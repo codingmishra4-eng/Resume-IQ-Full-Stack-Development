@@ -115,6 +115,28 @@ div[data-testid="stFileUploader"] section, div[data-testid="stFileUploader"] but
 }}
 div[data-testid="stFileUploader"] button {{ width: 100%; }}
 
+/* ---- Material icon hardening ----
+   Streamlit renders material icons as ligature text (e.g. "keyboard_arrow_right")
+   inside [data-testid="stIconMaterial"]. If its @font-face rule doesn't reach those
+   spans, the raw ligature words paint OVER the neighbouring label — looking like
+   corrupted text. Explicitly apply the bundled icon font so ligatures always
+   collapse into a single glyph, even offline. */
+[data-testid="stIconMaterial"] {{
+  font-family: "Material Symbols Rounded" !important;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: "liga";
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}}
+
 </style>
 """
 
