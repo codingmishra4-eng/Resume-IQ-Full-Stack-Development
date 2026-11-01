@@ -1,0 +1,21 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# --- Secrets & environment ---
+.env
+
+# --- Runtime artifacts (recreated on demand) ---
+data/
+generated_resumes/
+logs/
+smoke_out/
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+*.swp
