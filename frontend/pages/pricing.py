@@ -38,10 +38,12 @@ def render() -> None:
 <div class="ri-card" style="padding:18px 20px;margin-bottom:14px;">
   <div class="ri-eyebrow" style="margin-bottom:8px;">No payments · no accounts</div>
   <div style="font-size:13.5px;line-height:1.7;">
-    ResumeIQ <b>does not process payments</b> and has no account system. “Pro”
-    means pointing the app at an OpenAI key <b>you already own</b> — the app itself
-    stays free and local. Whatever OpenAI charges for your API usage is between
-    you and OpenAI.</div>
+    ResumeIQ has <b>no automatic payment processing</b> and no account system.
+    The payment buttons above show a fixed UPI ID for a <b>manual transfer</b> —
+    the app itself never takes card/bank details, never auto-verifies, and
+    nothing unlocks by clicking. “Pro” (AI narration) means pointing the app at
+    an OpenAI key <b>you already own</b>. Whatever OpenAI charges for your API
+    usage is between you and OpenAI.</div>
   <div style="font-size:12.5px;line-height:1.7;color:{styles.C['muted']};margin-top:10px;
        border-top:1px solid {styles.C['border']};padding-top:10px;">
     About the credit numbers below: the <b>Pro Max</b> card shows plan targets for
@@ -63,7 +65,15 @@ def render() -> None:
             st.info("No `.env` found yet — copy `.env.example` to `.env` to enable "
                     "AI narration (rule-based mode is the current default).", icon="ℹ️")
 
-        _env_instructions()
+    # ---- payment (manual UPI transfer) --------------------------------------
+    upi_id = "kavyamishra317@oksbi"
+    pay1, pay2 = st.columns([1, 1.15], gap="medium")
+    with pay1:
+        with st.popover("💳 Payment — Pro (₹99/mo)", use_container_width=True):
+            _payment_panel("Pro", "₹99", upi_id)
+    with pay2:
+        with st.popover("💳 Payment — Pro Max (₹299/mo)", use_container_width=True):
+            _payment_panel("Pro Max", "₹299", upi_id)
 
     # ---- Pro Max (planned hosted tier) — below the Pro column --------------
     st.markdown(_pro_max_card(), unsafe_allow_html=True)
@@ -216,19 +226,27 @@ def _pro_max_card() -> str:
 </div>"""
 
 
-def _env_instructions() -> None:
-    """Real, actionable enablement steps (nothing to buy inside ResumeIQ)."""
-    with st.expander("🔧 How to enable AI narration (Pro)", expanded=False):
-        st.markdown("1. Create a `.env` file in the project root "
-                    "(copy `.env.example`):")
-        st.code("copy .env.example .env", language="bash")
-        st.markdown("2. Put your OpenAI key in that file:")
-        st.code("OPENAI_API_KEY=sk-...\nOPENAI_MODEL=gpt-4o-mini", language="bash")
-        st.markdown("3. Restart ResumeIQ. The AI Improve page and analysis "
-                    "narration switch from *rule-based* to *OpenAI* automatically "
-                    "(badges on every suggestion show the source).")
-        st.caption("The key stays in your local `.env` (git-ignored). ResumeIQ "
-                   "never stores, transmits, or validates payment details.")
+def _payment_panel(plan: str, amount: str, upi_id: str) -> None:
+    """Manual UPI payment panel — shows a fixed UPI ID, nothing auto-verified."""
+    c = styles.C
+    st.markdown(f"""
+<div style="font-size:13.5px;line-height:1.8;">
+  <div class="ri-eyebrow" style="margin-bottom:6px;">{plan} · manual UPI transfer</div>
+  Send <b>{amount}/mo</b> from any UPI app (GPay · PhonePe · Paytm) to the ID
+  below. Put "<b>ResumeIQ {plan} + your name</b>" in the payment note so it can
+  be matched.</div>""", unsafe_allow_html=True)
+    st.code(upi_id, language=None)
+    st.markdown(f"""
+<div class="ri-card" style="padding:14px 16px;font-size:12.5px;line-height:1.9;
+     display:flex;gap:22px;flex-wrap:wrap;">
+  <div style="flex:1;min-width:200px;">
+    <b>Accepted</b> · GPay, PhonePe, Paytm, BHIM, any bank UPI app</div>
+  <div style="flex:1;min-width:200px;">
+    <b>Note</b> · amount is per month; quarterly = 3× with the same note</div>
+</div>""", unsafe_allow_html=True)
+    st.caption("⚠️ ResumeIQ does not process or verify payments automatically — "
+               "this is a plain manual transfer to the ID above. Nothing in the "
+               "app is unlocked by clicking these buttons.")
 
 
 def _detect_key(env_path) -> bool:
