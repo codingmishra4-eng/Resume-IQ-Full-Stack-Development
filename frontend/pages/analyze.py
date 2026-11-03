@@ -1,6 +1,10 @@
 """
 Analyze page — upload a resume (PDF/DOCX), optional job description,
-run the six-category ATS analysis and explore/discover the full report.
+run the six-category ATS analysis and explore the full report.
+
+The scoring/persistence pipeline (`_run_analysis`) and session keys
+(`analysis`, `last_report_pdf`) are untouched; this file only restyles
+the presentation layer.
 """
 
 from __future__ import annotations
@@ -13,19 +17,23 @@ from frontend import components, styles
 
 
 def render() -> None:
-    components.page_title("Analyze Resume", "Upload a PDF or DOCX to score its estimated "
-                          "ATS compatibility — everything runs on your machine.")
+    components.page_title("Resume Analyzer", "Upload a PDF or DOCX to score its estimated "
+                          "ATS compatibility — everything runs on your machine.",
+                          eyebrow="analyzer")
 
     engine = ScoringEngine()
     if not engine.ai.ai_available:
         _ai_notice()
 
-    # ---- upload form ----
+    # ---- upload form -------------------------------------------------------
     with st.container():
+        components.upload_hero()
+
         up_col, jd_col = st.columns([1.25, 1], gap="medium")
         with up_col:
             file = st.file_uploader("Resume file (PDF or DOCX, max 10 MB)",
-                                    type=["pdf", "docx"], accept_multiple_files=False)
+                                    type=["pdf", "docx"], accept_multiple_files=False,
+                                    label_visibility="collapsed")
         with jd_col:
             jd_text = st.text_area(
                 "Job description (optional — enables keyword scoring)",
@@ -40,16 +48,23 @@ def render() -> None:
             else:
                 _run_analysis(engine, file, jd_text)
 
-    # ---- results ----
+    # ---- results -----------------------------------------------------------
     if st.session_state.get("analysis"):
         _render_results()
 
 
 def _ai_notice() -> None:
-    st.info("🤖 OpenAI key not configured — running in **rule-based mode**. "
-            "Every score and finding is still computed from your actual document; "
-            "AI-narrated suggestions are simply replaced by rule-generated ones. "
-            "See `.env.example` to enable AI features.", icon="ℹ️")
+    c = styles.C
+    st.markdown(f"""
+<div class="ri-card" style="padding:12px 18px;margin:-6px 0 14px;display:flex;gap:12px;
+     align-items:center;border-left:3px solid {c['highlight']};">
+  <div style="font-size:17px;">🤖</div>
+  <div style="font-size:12.5px;line-height:1.6;color:{c['muted']};">
+    OpenAI key not configured — running in <b style="color:{c['text']};">rule-based mode</b>.
+    Every score and finding is still computed from your actual document; AI-narrated
+    suggestions are simply replaced by rule-generated ones.
+    See <code>.env.example</code> (<b>Upgrade</b> page) to enable AI narration.</div>
+</div>""", unsafe_allow_html=True)
 
 
 def _run_analysis(engine, file, jd_text: str) -> None:
@@ -117,32 +132,35 @@ def _render_results() -> None:
     parsed, ats, match = analysis.parsed, analysis.ats, analysis.job_match
 
     st.divider()
-    st.markdown("### 📊 Results")
+    components.section_title("Analysis results",
+                             f"{components.esc(parsed.file_name)} · "
+                             f"{parsed.word_count} words · analyzed locally")
 
-    # score ring + category bars
-    components.score_ring(ats.overall)
+    # score ring + download report (row)
+    ring_col, dl_col = st.columns([2.6, 1], gap="medium")
+    with ring_col:
+        components.score_ring(ats.overall)
+    with dl_col:
+        if st.session_state.get("last_report_pdf"):
+            st.markdown("<div style='height:26px;'></div>", unsafe_allow_html=True)
+            with open(st.session_state.last_report_pdf, "rb") as fh:
+                st.download_button("⬇  Download full PDF report", fh,
+                                   file_name="resumeiq_report.pdf", mime="application/pdf",
+                                   use_container_width=True)
+            st.caption("The complete branded report — every finding from this session.")
+
     st.markdown(components.category_bars(analysis.category_scores), unsafe_allow_html=True)
 
-    # download report
-    if st.session_state.get("last_report_pdf"):
-        with open(st.session_state.last_report_pdf, "rb") as fh:
-            st.download_button("⬇  Download full PDF report", fh,
-                               file_name="resumeiq_report.pdf", mime="application/pdf")
-
-    # ---- strengths / weaknesses / recommendations ----
+    # ---- strengths / weaknesses / recommendations ---------------------------
     s1, s2, s3 = st.columns(3, gap="medium")
-    with s1:
-        st.markdown("##### 💪 Strengths")
-        _bulleted(ats.strengths, "✔")
-    with s2:
-        st.markdown("##### 🧭 Weaknesses")
-        _bulleted(ats.weaknesses, "▲")
-    with s3:
-        st.markdown("##### ✅ Top recommendations")
-        _bulleted(ats.recommendations[:6], "→", numbered=True)
+    _finding_card(s1, "💪 Strengths", ats.strengths, "✔", styles.C["green"])
+    _finding_card(s2, "🧭 Weaknesses", ats.weaknesses, "▲", styles.C["red"])
+    _finding_card(s3, "✅ Top recommendations", ats.recommendations[:6], "", styles.C["accent"],
+                  numbered=True)
 
-    # ---- category detail (expandable, verified notation) ----
-    st.markdown("#### Category breakdown")
+    # ---- category detail (expandable, verified notation) --------------------
+    components.section_title("Category breakdown", "Expand a category to see every atomic "
+                             "check with its evidence — pass / warning / fail.")
     nice = {"readability": "📖 Readability & parseability",
             "structure": "🧱 Structure & sections",
             "completeness": "📋 Content completeness",
@@ -161,14 +179,16 @@ def _render_results() -> None:
             if key in limiters:
                 st.caption(limiters[key])
 
-    # ---- writing quality ----
-    st.markdown("#### ✍️ Writing quality")
+    # ---- writing quality ----------------------------------------------------
+    components.section_title("✍️ Writing quality", "Rule-based language checks with "
+                             "evidence — fix what frames your work poorly.")
     w = ats.writing
     if w is None:
         st.caption("Writing checks unavailable.")
         return
     col_a, col_b = st.columns(2, gap="medium")
     with col_a:
+        st.markdown("**Spelling & length**")
         if w.spelling_issues:
             for i in w.spelling_issues[:14]:
                 st.markdown(components.issue_row(i.kind, i.message, i.suggestion, i.context),
@@ -182,6 +202,7 @@ def _render_results() -> None:
                 st.markdown(f"<div style='color:{styles.C['muted']};font-size:12.5px;font-style:italic'>"
                             f"“{components.esc(s[:220])}…”</div>", unsafe_allow_html=True)
     with col_b:
+        st.markdown("**Phrasing & vocabulary**")
         if w.weak_phrasings:
             for i in w.weak_phrasings[:10]:
                 st.markdown(components.issue_row(i.kind, i.message, i.suggestion, i.context),
@@ -194,8 +215,9 @@ def _render_results() -> None:
             st.caption("⏱ Repeated terms (6+ occurrences): " +
                        ", ".join(f"{word} ×{cnt}" for word, cnt in w.repeated_words[:6]))
 
-    # ---- contact & structure ----
-    st.markdown("#### 🔎 What we extracted (verified)")
+    # ---- contact & structure ------------------------------------------------
+    components.section_title("🔎 What we extracted (verified)",
+                             "Facts read directly from your document — shown as parsed.")
     c1, c2, c3 = st.columns(3, gap="medium")
     with c1:
         st.markdown("**Contact details**")
@@ -220,58 +242,80 @@ def _render_results() -> None:
                     "</div>", unsafe_allow_html=True)
     with c3:
         st.markdown("**Sections recognised** (pattern-matched, heuristic)")
-        order = " → ".join(parsed.section_order) if parsed.section_order else "none detected"
-        st.markdown(f"<div style='font-size:13px;line-height:1.9'>{components.esc(order)}</div>",
-                    unsafe_allow_html=True)
+        order = parsed.section_order or []
+        if order:
+            st.markdown(components.skill_chips(order, styles.C["highlight"], "14"),
+                        unsafe_allow_html=True)
+        else:
+            st.caption("none detected")
 
     if parsed.warnings:
         for warn in parsed.warnings:
             st.warning(f"⚠️ {warn}", icon="⚠️")
 
-    # ---- job match section ----
+    # ---- job match section --------------------------------------------------
     if match:
-        st.markdown("#### 🎯 Job description match")
+        components.section_title("🎯 Job description match",
+                                 "Computed because you supplied a JD — heuristic estimate.")
         _job_match_inline(match)
 
-    st.divider()
-    st.markdown(f"<div style='color:{styles.C['muted']};font-size:12px;'>"
-                "ℹ️ Score types — <b>Verified:</b> facts read directly from your document. "
-                "<b>Heuristic:</b> pattern-based warnings that may need human judgment. "
-                "The overall figure is an <b>estimated ATS compatibility score</b>, not an "
-                "official ATS vendor result.</div>", unsafe_allow_html=True)
 
-
-def _bulleted(items: list[str], glyph: str, numbered: bool = False) -> None:
-    if not items:
-        st.caption("Nothing notable detected.")
-        return
-    rows = "".join(
-        f"<div style='margin:5px 0;font-size:13px;'><b style='color:{styles.C['muted']}'>"
-        f"{(i + 1 if numbered else glyph)}.</b> {components.esc(it)}</div>"
-        for i, it in enumerate(items))
-    st.markdown(f"<div style=''>{rows}</div>", unsafe_allow_html=True)
+def _finding_card(col, title: str, items: list[str], glyph: str,
+                  color: str, numbered: bool = False) -> None:
+    """One strengths/weaknesses/recommendations card in the design system."""
+    with col:
+        if not items:
+            st.markdown(
+                f"<div class='ri-card' style='padding:14px 18px;'>"
+                f"<div class='ri-eyebrow'>{components.esc(title.upper())}</div>"
+                f"<div style='color:{styles.C['muted']};font-size:13px;margin-top:8px;'>"
+                f"Nothing notable detected.</div></div>", unsafe_allow_html=True)
+            return
+        rows = "".join(
+            f"<div style='display:flex;gap:9px;padding:7px 0;"
+            f"border-bottom:1px dashed rgba(41,52,66,.6);'>"
+            f"<span style='color:{color};font-weight:700;font-size:12.5px;flex:none;"
+            f"padding-top:1px;'>{(str(i + 1) + '.') if numbered else glyph}</span>"
+            f"<span style='font-size:13px;line-height:1.55;'>{components.esc(it)}</span></div>"
+            for i, it in enumerate(items))
+        st.markdown(
+            f"<div class='ri-card' style='padding:14px 18px;'>"
+            f"<div class='ri-eyebrow'>{components.esc(title.upper())}</div>"
+            f"<div style='margin-top:6px;'>{rows}</div></div>", unsafe_allow_html=True)
 
 
 def _job_match_inline(match) -> None:
-    c = st.columns([1, 2, 2], gap="medium")
-    with c[0]:
-        st.markdown(f"""<div style='background:{styles.C['card']};border:1px solid {styles.C['border']};
-            border-radius:16px;padding:18px;text-align:center;'>
-            <div style='font-size:38px;font-weight:800;font-family:JetBrains Mono,monospace;color:#22d3ee;'>
-            {match.match_score:.0f}%</div>
-            <div style='color:{styles.C['muted']};font-size:12px;'>heuristic match estimate</div>
-            <div style='margin-top:8px;font-size:13px;font-weight:600;'>{components.esc(match.job_title or 'Unnamed role')}</div>
-        </div>""", unsafe_allow_html=True)
-    with c[1]:
+    c = styles.C
+    score_color = styles.C["green"] if match.match_score >= 75 else \
+        styles.C["amber"] if match.match_score >= 50 else styles.C["red"]
+    dial_col, left_col, right_col = st.columns([1, 1.5, 1.5], gap="medium")
+    with dial_col:
+        st.markdown(f"""
+<div class="ri-card" style="padding:18px;text-align:center;">
+  <div style="width:110px;height:110px;margin:0 auto;border-radius:50%;
+       background:conic-gradient({score_color} {match.match_score * 3.6:.1f}deg,
+       rgba(148,163,184,.14) 0deg);display:flex;align-items:center;justify-content:center;">
+    <div style="width:86px;height:86px;border-radius:50%;background:{c['card']};
+         display:flex;align-items:center;justify-content:center;">
+      <span style="font-size:24px;font-weight:800;color:{score_color};
+            font-family:'JetBrains Mono',monospace;">{match.match_score:.0f}%</span>
+    </div>
+  </div>
+  <div class="ri-eyebrow" style="margin-top:10px;">heuristic match estimate</div>
+  <div style="font-size:13.5px;font-weight:600;margin-top:3px;">
+    {components.esc(match.job_title or 'Unnamed role')}</div>
+</div>""", unsafe_allow_html=True)
+    with left_col:
         st.markdown("**✅ Matching skills**")
         st.markdown(components.skill_chips(match.matching, styles.C["green"]), unsafe_allow_html=True)
         st.markdown("**🟡 Partial matches** (same domain, different term)")
         st.markdown(components.skill_chips(match.partial, styles.C["amber"]), unsafe_allow_html=True)
-    with c[2]:
+    with right_col:
         st.markdown("**❌ Missing from resume**")
         st.markdown(components.skill_chips(match.missing, styles.C["red"]), unsafe_allow_html=True)
         if match.jd_extra_keywords:
             st.markdown("**JD vocabulary worth adding (truthfully):**")
-            st.markdown(components.skill_chips(match.jd_extra_keywords, styles.C["accent2"]), unsafe_allow_html=True)
+            st.markdown(components.skill_chips(match.jd_extra_keywords, styles.C["accent2"]),
+                        unsafe_allow_html=True)
     for note in match.notes:
         st.caption("ℹ️ " + note)

@@ -61,22 +61,23 @@ def _gallery() -> None:
             badge = "✔ ATS-SAFE" if tpl.ats_friendly else "⚠ CREATIVE"
             badge_color = styles.C["green"] if tpl.ats_friendly else styles.C["amber"]
             st.markdown(f"""
-<div style='background:{styles.C['card']};border:1.5px solid {accent if is_active else styles.C['border']};
-     border-radius:16px;padding:16px;'>
-  <div style='display:flex;justify-content:space-between;align-items:center;'>
-    <div style='width:34px;height:34px;border-radius:10px;background:{accent};
-      display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;
-      font-family:JetBrains Mono,monospace;'>{idx + 1}</div>
-    <span style='font-size:10.5px;font-weight:700;color:{badge_color};background:{badge_color}18;
-      border:1px solid {badge_color}44;border-radius:99px;padding:2px 9px;'>{badge}</span>
+<div class="ri-card ri-lift" style="padding:16px;
+     {'border-color:' + (accent if is_active else styles.C['border'])};
+     {'box-shadow:0 0 0 1.5px ' + accent + '55;' if is_active else ''}">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div style="width:34px;height:34px;border-radius:10px;background:{accent};
+      display:flex;align-items:center;justify-content:center;color:#08131b;font-weight:800;
+      font-family:'JetBrains Mono',monospace;">{idx + 1}</div>
+    <span class="ri-badge" style="color:{badge_color};background:{badge_color}18;
+      border:1px solid {badge_color}44;">{badge}</span>
   </div>
-  <div style='font-weight:700;margin-top:10px;'>{components.esc(tpl.name)}</div>
-  <div style='color:{styles.C['muted']};font-size:12px;margin-top:4px;line-height:1.5;'>
+  <div style="font-weight:700;margin-top:10px;">{components.esc(tpl.name)}</div>
+  <div style="color:{styles.C['muted']};font-size:12px;margin-top:4px;line-height:1.5;">
       {components.esc(tpl.description)}</div>
-  <div style='margin-top:9px;display:flex;gap:5px;'>
-    <div style='width:26%;height:8px;border-radius:99px;background:{accent};'></div>
-    <div style='width:44%;height:8px;border-radius:99px;background:{accent}55;'></div>
-    <div style='width:30%;height:8px;border-radius:99px;background:{accent}22;'></div>
+  <div style="margin-top:11px;display:flex;gap:5px;align-items:center;">
+    <div style="width:26%;height:8px;border-radius:99px;background:{accent};"></div>
+    <div style="width:44%;height:8px;border-radius:99px;background:{accent}55;"></div>
+    <div style="width:30%;height:8px;border-radius:99px;background:{accent}22;"></div>
   </div>
 </div>""", unsafe_allow_html=True)
             if st.button(("✓  Selected" if is_active else "Select"),
@@ -186,6 +187,7 @@ def _load_import_panel() -> None:
                                    f"{components.esc(rec.template_id)}", unsafe_allow_html=True)
                     if cc[1].button("Load", key=f"load_{rec.id}"):
                         data = json.loads(json.dumps(rec.data_json))          # deep copy
+                        clear_builder_widget_cache()
                         st.session_state["resume_data"] = data
                         st.session_state["template_id"] = rec.template_id
                         st.rerun()
@@ -197,21 +199,38 @@ def _load_import_panel() -> None:
         with c2:
             st.markdown("**Autofill with editable sample** (explore first, replace after)")
             if st.button("✨ Fill example content", use_container_width=True):
+                clear_builder_widget_cache()
                 st.session_state["resume_data"] = json.loads(json.dumps(_sample_resume_json()))
                 st.rerun()
             st.caption("⚠️ Sample content is deliberately generic — replace with your real details.")
+
+
+def clear_builder_widget_cache() -> None:
+    """Drop keyed-widget state bound to fixed keys so freshly loaded data shows.
+
+    Keyed Streamlit widgets ignore their `value` argument once the key exists in
+    session state — so applying a saved/sample resume must clear them *before*
+    the widgets are re-instantiated in the next run.
+    """
+    fixed = ["f_name", "f_email", "f_head", "f_phone", "f_loc", "f_link",
+             "f_git", "f_web", "f_sum", "f_skills", "n_extra",
+             "lst_achievements", "lst_interests"]
+    for i in range(8):
+        fixed += [f"ext_{i}_t", f"ext_{i}_b", f"stamp_{i}"]
+    for key in fixed:
+        try:
+            del st.session_state[key]
+        except Exception:                                       # noqa: BLE001
+            pass
 
 
 def _completeness_meter(result: dict) -> None:
     live = ResumeData.from_dict(result)
     pct, missing = live.completeness()
     st.markdown(f"#### 📈 Resume completeness — {pct}%")
-    st.markdown(f"""<div style='background:{styles.C['card']};border:1px solid {styles.C['border']};
-        border-radius:14px;padding:14px 18px;'>
-        <div style='height:10px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;'>
-          <div style='width:{max(pct, 2)}%;height:100%;
-               background:linear-gradient(90deg,{styles.C['accent']},{styles.C['accent2']});'></div>
-        </div>
+    st.markdown(f"""<div class='ri-card' style='padding:14px 18px;'>
+        <div class="ri-track" style="height:10px;"><div class="ri-fill ri-fill-anim"
+          style="width:{max(pct, 2)}%;background:linear-gradient(90deg,{styles.C['accent']},{styles.C['accent2']});"></div></div>
         <div style='font-size:12.5px;color:{styles.C['muted']};margin-top:8px;'>
           {'✅ All essential sections filled.' if pct >= 90 else
            'Still missing: ' + components.esc(', '.join(missing))}
@@ -358,12 +377,8 @@ def _preview_and_export(data: ResumeData) -> None:
             score = analysis.ats.overall
             color = styles.C["green"] if score >= 75 else styles.C["amber"] \
                 if score >= 50 else styles.C["red"]
-            st.markdown(f"""<div style='text-align:center;background:{styles.C['card']};
-                border:1px solid {styles.C['border']};border-radius:14px;padding:12px;'>
-                <div style='color:{color};font-weight:800;font-family:JetBrains Mono,monospace;
-                font-size:28px;'>{score:.0f}</div>
-                <div style='font-size:10.5px;color:{styles.C['muted']};'>estimated ATS score</div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(components.score_chip(score, "estimated ATS score"),
+                        unsafe_allow_html=True)
             tips = (analysis.ats.recommendations or [])[:3]
             for t in tips:
                 st.caption("• " + t[:110])

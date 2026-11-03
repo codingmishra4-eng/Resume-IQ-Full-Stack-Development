@@ -1,10 +1,10 @@
 # Streamlit theme baseline (custom CSS in frontend/styles.py adds the premium layer)
 [theme]
 base = "dark"
-primaryColor = "#6d7dff"
-backgroundColor = "#0b1020"
-secondaryBackgroundColor = "#0f172c"
-textColor = "#e6ebf5"
+primaryColor = "#10B981"
+backgroundColor = "#0B0F14"
+secondaryBackgroundColor = "#111820"
+textColor = "#F8FAFC"
 font = "sans serif"
 
 [server]

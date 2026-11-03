@@ -1,8 +1,12 @@
 """
-Dashboard page — hero, stats, score trend, recent analyses, quick actions.
+Dashboard — greeting, live KPIs, score trend, quick actions, recent activity,
+improvement overview. Every number comes from SQLite / the scoring engine.
 """
 
 from __future__ import annotations
+
+import datetime as _dt
+import html as _html
 
 import streamlit as st
 
@@ -16,97 +20,147 @@ def render() -> None:
     stats = db.stats()
     trend = db.score_trend()
 
-    components.page_title("Welcome to ResumeIQ", "Your AI resume command center — "
-                          "analyze, score, match and build.")
+    # ---- greeting (no invented user data; time-of-day only) ----------------
+    hour = _dt.datetime.now().hour
+    greeting = ("Good morning" if 5 <= hour < 12 else
+                "Good afternoon" if 12 <= hour < 17 else "Good evening")
+    st.markdown(f"""
+<div class="main-enter" style="margin-bottom:20px;">
+  <div class="ri-eyebrow">{_html.escape(config.APP_NAME)} · dashboard</div>
+  <div class="ri-title" style="font-size:29px;margin-top:5px;">{greeting} — your resume command center</div>
+  <div class="ri-subtitle" style="margin-top:4px;">Analyze, score, match and build —
+      everything stays on your device.</div>
+</div>""", unsafe_allow_html=True)
 
-    # ---- KPI row ---------------------------------------------------------
-    kpi_html = (
-        components.stat_card("Analyses run", str(stats["analyses"]), "🧪") +
-        components.stat_card("Average score", f"{stats['avg_score']:g}", "📊") +
-        components.stat_card("Best score", f"{stats['best_score']:g}", "🏆") +
-        components.stat_card("Built resumes", str(stats["resumes"]), "🗂"))
-    st.markdown(f"<div class='main-enter' style='display:flex;gap:14px;flex-wrap:wrap;'>{kpi_html}</div>",
-                unsafe_allow_html=True)
+    # ---- KPI row (real database values) ------------------------------------
+    kpis = st.columns(4, gap="medium")
+    with kpis[0]:
+        st.markdown(components.stat_card("Resumes analyzed", str(stats["analyses"]), "🧪",
+                                         styles.C["accent"]), unsafe_allow_html=True)
+    with kpis[1]:
+        st.markdown(components.stat_card("Average ATS score", f"{stats['avg_score']:g}", "📊",
+                                         styles.C["highlight"]), unsafe_allow_html=True)
+    with kpis[2]:
+        st.markdown(components.stat_card("Best score", f"{stats['best_score']:g}", "🏆",
+                                         styles.C["accent2"]), unsafe_allow_html=True)
+    with kpis[3]:
+        st.markdown(components.stat_card("Resumes built", str(stats["resumes"]), "🗂",
+                                         styles.C["amber"]), unsafe_allow_html=True)
 
-    # ---- trend + quick actions ------------------------------------------
-    trend_col, actions_col = st.columns([1.6, 1], gap="medium")
+    # ---- trend + quick actions ---------------------------------------------
+    trend_col, actions_col = st.columns([1.55, 1], gap="medium")
     with trend_col:
-        st.markdown("#### Score trend")
+        st.markdown("<div style='margin:26px 0 10px;' class='ri-title'>Score trend</div>",
+                    unsafe_allow_html=True)
         if len(trend) >= 2:
             _trend_chart(trend)
         elif len(trend) == 1:
-            st.info("One analysis recorded so far. Analyze another version to watch the trend.")
+            components.empty_state("📈", "One analysis recorded so far",
+                                   "Analyze another version of your resume to watch the trend line here.")
         else:
-            st.info("No analyses yet. Your ATS score history will appear here.")
-
+            components.empty_state("📈", "No analyses yet",
+                                   "Your ATS score history will appear here after your first analysis.")
     with actions_col:
-        st.markdown("#### Quick actions")
-        for label, page, icon in [
-            ("Analyze a resume", "Analyze", "🧪"),
-            ("Match against a job description", "Job Match", "🎯"),
-            ("Improve with AI suggestions", "AI Improve", "✨"),
-            ("Build a new resume", "Resume Builder", "🗂"),
-        ]:
-            if st.button(f"{icon}  {label}", key=f"qa_{page}", use_container_width=True):
-                st.session_state.nav = page
-                st.rerun()
-
-    # ---- recent analyses --------------------------------------------------
-    st.markdown("#### Recent analyses")
-    records = db.list_analyses(limit=5)
-    if not records:
-        st.markdown(f"""<div style='background:{styles.C['card']};border:1px solid {styles.C['border']};
-            border-radius:16px;padding:28px;text-align:center;color:{styles.C['muted']};'>
-            No resumes analyzed yet — click <b>Analyze</b> to run your first one.</div>""",
+        st.markdown("<div style='margin:26px 0 10px;' class='ri-title'>Quick actions</div>",
                     unsafe_allow_html=True)
-    else:
-        rows = ""
-        for rec in records:
-            score = rec.ats_score
-            color = (styles.C["green"] if score >= 75 else
-                     styles.C["amber"] if score >= 50 else styles.C["red"])
-            rows += f"""
-<tr>
-  <td style='padding:10px 8px;border-bottom:1px solid {styles.C['border']};font-weight:600;'>
-      {components.esc(rec.file_name)}</td>
-  <td style='padding:10px 8px;border-bottom:1px solid {styles.C['border']};color:{styles.C['muted']};'>
-      {(rec.uploaded_at.strftime('%d %b %Y %H:%M') if rec.uploaded_at else '')}</td>
-  <td style='padding:10px 8px;border-bottom:1px solid {styles.C['border']};color:{styles.C['muted']};'>
-      {rec.word_count} words</td>
-  <td style='padding:10px 8px;border-bottom:1px solid {styles.C['border']};font-weight:800;color:{color};'>
-      {score:.1f}</td>
-  <td style='padding:10px 8px;border-bottom:1px solid {styles.C['border']};'>
-      {('—' if rec.job_match_score is None else f'<b>{rec.job_match_score:.0f}%</b>')}</td>
-</tr>"""
-        st.markdown(f"""
-<table style='width:100%;border-collapse:collapse;font-size:13.5px;'>
-  <tr style='color:{styles.C['muted']};text-transform:uppercase;font-size:11px;letter-spacing:.1em;
-      border-bottom:1px solid {styles.C['border']};'>
-    <th style='text-align:left;padding:6px 8px;'>File</th>
-    <th style='text-align:left;padding:6px 8px;'>When</th>
-    <th style='text-align:left;padding:6px 8px;'>Size</th>
-    <th style='text-align:left;padding:6px 8px;'>ATS score</th>
-    <th style='text-align:left;padding:6px 8px;'>Job match</th>
-  </tr>{rows}</table>""", unsafe_allow_html=True)
+        components.action_card("🧪", "Analyze a resume",
+                               "Score its estimated ATS compatibility in seconds.",
+                               "Analyze", "qa_analyze", styles.C["accent"])
+        components.action_card("🎯", "Match against a job description",
+                               "See matched, partial and missing skills.",
+                               "Job Match", "qa_match", styles.C["highlight"])
+        components.action_card("✨", "Improve with AI suggestions",
+                               "Before/after rewrites you accept or reject.",
+                               "AI Improve", "qa_improve", styles.C["accent2"])
+        components.action_card("🗂", "Build a new resume",
+                               "15 templates, live preview, PDF & DOCX export.",
+                               "Resume Builder", "qa_builder", styles.C["amber"])
 
-    # ---- builder teaser ----------------------------------------------------
-    st.markdown("#### Resume builder")
-    st.markdown(f"""<div style='background:{styles.C['card']};border:1px solid {styles.C['border']};
-        border-radius:16px;padding:20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;'>
-        <div style='font-size:30px;'>🗂</div>
-        <div style='flex:1;min-width:220px;'>
-            <div style='font-weight:700;'>15 professional templates, live preview, PDF & DOCX export</div>
-            <div style='color:{styles.C['muted']};font-size:13px;margin-top:4px;'>
-                Switch templates freely — your content never resets. ATS-friendly layouts flagged in the gallery.</div>
-        </div>
-        <div style='color:{styles.C['muted']};font-size:13px;'>{stats['resumes']} saved</div>
-    </div>""", unsafe_allow_html=True)
+    # ---- improvement overview (real latest analysis) ------------------------
+    records = db.list_analyses(limit=5)
+    latest = records[0] if records else None
+    st.markdown("<div style='margin:30px 0 10px;' class='ri-title'>Resume improvement overview</div>",
+                unsafe_allow_html=True)
+    if latest:
+        rep = latest.report_json or {}
+        ats = rep.get("ats", {})
+        ov_col, tips_col = st.columns([1.1, 1.9], gap="medium")
+        with ov_col:
+            cats = {k: c.get("score", 0) for k, c in (ats.get("categories") or {}).items()}
+            weakest = sorted(cats.items(), key=lambda kv: kv[1])[:2] if cats else []
+            cards = "".join(
+                f"<div class='ri-card' style='padding:12px 14px;flex:1;min-width:120px;'>"
+                f"<div class='ri-eyebrow'>{components.esc(k)}</div>"
+                f"<div class='ri-mono' style='font-size:19px;font-weight:800;"
+                f"color:{_score_color(v)};margin-top:3px;'>{v:.0f}<span style='font-size:11px;"
+                f"color:{styles.C['muted']};'>/100</span></div></div>"
+                for k, v in weakest)
+            st.markdown(f"""
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">{cards}</div>
+<div style="color:{styles.C['muted']};font-size:12px;">Lowest-scoring categories of your
+ most recent analysis (#{latest.id}). Improve these first.</div>""", unsafe_allow_html=True)
+        with tips_col:
+            recs = (ats.get("recommendations") or [])[:3]
+            if recs:
+                rows = "".join(
+                    f"<div style='display:flex;gap:10px;padding:8px 0;'>"
+                    f"<span class='ri-dot' style='background:{styles.C['accent']};margin-top:6px;'></span>"
+                    f"<div style='font-size:13.5px;line-height:1.55;'>{components.esc(t[:150])}</div></div>"
+                    for t in recs)
+                st.markdown(f"<div class='ri-card' style='padding:14px 18px;'>{rows}"
+                            f"<div style='color:{styles.C['muted']};font-size:11.5px;margin-top:6px;'>"
+                            f"Top recommendations from #{latest.id} — open "
+                            f"<b>AI Improve</b> to act on them.</div></div>",
+                            unsafe_allow_html=True)
+
+    # ---- recent activity ----------------------------------------------------
+    st.markdown("<div style='margin:26px 0 10px;' class='ri-title'>Recent activity</div>",
+                unsafe_allow_html=True)
+    if not records:
+        components.empty_state("🧪", "No resumes analyzed yet",
+                               "Click “Analyze a resume” above to run your first analysis — "
+                               "it takes just a few seconds.")
+    else:
+        rows = []
+        for rec in records:
+            color = _score_color(rec.ats_score)
+            when = rec.uploaded_at.strftime("%d %b %Y, %H:%M") if rec.uploaded_at else "—"
+            match = "—" if rec.job_match_score is None else f"<b>{rec.job_match_score:.0f}%</b>"
+            rows.append([
+                components.esc(rec.file_name),
+                f"<span style='color:{styles.C['muted']}'>{when}</span>",
+                f"<span style='color:{styles.C['muted']}'>{rec.word_count} words</span>",
+                f"<span class='ri-mono' style='font-weight:800;color:{color};'>{rec.ats_score:.1f}</span>",
+                match,
+            ])
+        st.markdown(components.data_table(
+            ["File", "When", "Size", "Estimated ATS score", "Job match"], rows),
+            unsafe_allow_html=True)
+
+    # ---- builder teaser -----------------------------------------------------
+    st.markdown("<div style='margin:26px 0 10px;' class='ri-title'>Resume builder</div>",
+                unsafe_allow_html=True)
+    st.markdown(f"""
+<div class="main-enter ri-card ri-lift" style="padding:20px;display:flex;gap:16px;
+     align-items:center;flex-wrap:wrap;">
+  <div class="ri-action-icon" style="background:{styles.C['accent2']}1e;
+       border:1px solid {styles.C['accent2']}44;font-size:19px;">🗂</div>
+  <div style="flex:1;min-width:230px;">
+    <div style="font-weight:700;">15 professional templates · live preview · PDF & DOCX export</div>
+    <div style="color:{styles.C['muted']};font-size:12.5px;margin-top:4px;">
+      Switch templates freely — your content never resets. ATS-friendly layouts are flagged.</div>
+  </div>
+  <div style="color:{styles.C['muted']};font-size:12.5px;">{stats['resumes']} saved</div>
+</div>""", unsafe_allow_html=True)
+
+
+def _score_color(v: float) -> str:
+    return styles.C["green"] if v >= 75 else styles.C["amber"] if v >= 50 else styles.C["red"]
 
 
 def _trend_chart(trend: list[tuple[str, float]]) -> None:
-    """Small inline SVG line chart (no external dependency)."""
-    import html as _html
-    width, height, pad = 640, 220, 42
+    """Inline SVG line chart in the new palette (no external dependency)."""
+    width, height, pad = 640, 220, 40
     n = len(trend)
     vals = [v for _, v in trend]
     lo, hi = min(min(vals), 20), max(max(vals), 80)
@@ -120,18 +174,30 @@ def _trend_chart(trend: list[tuple[str, float]]) -> None:
     pts = [xy(i, v) for i, (_, v) in enumerate(trend)]
     path = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
     dots = "".join(
-        f"<circle cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='#6d7dff' stroke='#0b1020' stroke-width='2'/>"
-        for x, y in pts)
+        f"<circle cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='{styles.C['accent']}' "
+        f"stroke='{styles.C['bg_alt']}' stroke-width='2'/>" for x, y in pts)
     labels = "".join(
-        f"<text x='{x:.1f}' y='{height - 12}' text-anchor='middle' fill='#8b95ad' font-size='10'>"
-        f"{_html.escape(d[5:] if len(d) >= 10 else d)}" "</text>"
+        f"<text x='{x:.1f}' y='{height - 12}' text-anchor='middle' "
+        f"fill='{styles.C['muted']}' font-size='10' font-family='Inter,sans-serif'>"
+        f"{_html.escape(d[5:] if len(d) >= 10 else d)}</text>"
         for d, (x, _) in zip([t[0] for t in trend], [(p[0], 0) for p in pts]))
-    svg = (f"<svg viewBox='0 0 {width} {height}' style='width:100%;max-width:{width}px;'>"
-           f"<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>"
-           f"<stop offset='0%' stop-color='#6d7dff' stop-opacity='.35'/>"
-           f"<stop offset='100%' stop-color='#6d7dff' stop-opacity='0'/></linearGradient></defs>"
-           f"<polyline points='0,{height - pad} {path} {width},{height - pad}' fill='url(#g)' stroke='none'/>"
-           f"<polyline points='{path}' fill='none' stroke='#6d7dff' stroke-width='2.5' "
-           f"stroke-linejoin='round' stroke-linecap='round'/>"
-           f"{dots}{labels}</svg>")
-    st.markdown(svg, unsafe_allow_html=True)
+    svg = f"""
+<svg viewBox='0 0 {width} {height}' style='width:100%;max-width:640px;'>
+  <defs>
+    <linearGradient id='garea' x1='0' y1='0' x2='0' y2='1'>
+      <stop offset='0%' stop-color='{styles.C['accent']}' stop-opacity='.28'/>
+      <stop offset='100%' stop-color='{styles.C['accent']}' stop-opacity='0'/>
+    </linearGradient>
+    <linearGradient id='gline' x1='0' y1='0' x2='1' y2='0'>
+      <stop offset='0%' stop-color='{styles.C['accent']}'/>
+      <stop offset='100%' stop-color='{styles.C['accent2']}'/>
+    </linearGradient>
+  </defs>
+  <polyline points='0,{height - pad} {path} {width},{height - pad}'
+    fill='url(#garea)' stroke='none'/>
+  <polyline points='{path}' fill='none' stroke='url(#gline)' stroke-width='2.5'
+    stroke-linejoin='round' stroke-linecap='round'/>
+  {dots}{labels}
+</svg>"""
+    st.markdown(f"""<div class='ri-card' style='padding:18px 20px;'>{svg}</div>""",
+                unsafe_allow_html=True)

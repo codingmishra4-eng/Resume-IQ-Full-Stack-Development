@@ -21,10 +21,12 @@ _matcher = JobMatcher(KeywordAnalyzer())
 
 def render() -> None:
     components.page_title("Job Match", "See exactly which job requirements your resume "
-                          "covers, partially covers, or misses — computed from your real text.")
+                          "covers, partially covers, or misses — computed from your real text.",
+                          eyebrow="matcher")
 
-    # ---------------- inputs -----------------------------------------------
+    # ---------------- inputs -------------------------------------------------
     src_col, jd_col = st.columns([1, 2.2], gap="medium")
+
     resume_text: str | None = None
     resume_name = ""
 
@@ -102,15 +104,24 @@ def _render_match() -> None:
         st.info("Run a match first.")
         return
 
+    score_color = (styles.C["green"] if match.match_score >= 75 else
+                   styles.C["amber"] if match.match_score >= 50 else styles.C["red"])
+
     # ---- score header ------------------------------------------------------
     c1 = st.columns([1, 3])[0]
     with c1:
-        st.markdown(f"""<div style='background:{styles.C['card']};border:1px solid {styles.C['border']};
-            border-radius:18px;padding:22px;text-align:center;'>
-            <div style='font-size:44px;font-weight:800;font-family:JetBrains Mono,monospace;color:#22d3ee;'>
-            {match.match_score:.0f}%</div>
-            <div style='color:{styles.C['muted']};font-size:12px;'>heuristic match estimate</div>
-            <div style='margin-top:8px;font-size:14px;font-weight:600;'>
+        st.markdown(f"""<div class="ri-card" style="padding:22px;text-align:center;">
+            <div style="width:118px;height:118px;margin:0 auto;border-radius:50%;
+                 background:conic-gradient({score_color} {match.match_score * 3.6:.1f}deg,
+                 rgba(148,163,184,.14) 0deg);display:flex;align-items:center;justify-content:center;">
+              <div style="width:92px;height:92px;border-radius:50%;background:{styles.C['card']};
+                   display:flex;align-items:center;justify-content:center;">
+                <span style="font-size:26px;font-weight:800;color:{score_color};
+                      font-family:'JetBrains Mono',monospace;">{match.match_score:.0f}%</span>
+              </div>
+            </div>
+            <div class="ri-eyebrow" style="margin-top:10px;">heuristic match estimate</div>
+            <div style="margin-top:6px;font-size:14px;font-weight:600;">
             {components.esc(match.job_title or 'Unnamed role')}</div>
         </div>""", unsafe_allow_html=True)
 
@@ -118,36 +129,42 @@ def _render_match() -> None:
     left, right = st.columns(2, gap="medium")
     with left:
         st.markdown("#### 💼 Your resume shows")
-        for category, skills in sorted(match.resume_categories.items()):
-            if skills:
-                st.markdown(f"**{category}**")
-                st.markdown(components.skill_chips(skills, styles.C["green"]), unsafe_allow_html=True,
-                            )
-        if not match.resume_categories:
+        if match.resume_categories:
+            cards = "".join(
+                f"<div class='ri-card' style='padding:12px 16px;flex:1;min-width:200px;'>"
+                f"<div class='ri-eyebrow'>{components.esc(category)}</div>"
+                f"<div style='margin-top:6px;'>"
+                f"{components.skill_chips(skills, styles.C['green'])}</div></div>"
+                for category, skills in sorted(match.resume_categories.items()) if skills)
+            st.markdown(f"<div class='ri-flexwrap'>{cards}</div>", unsafe_allow_html=True)
+        else:
             st.caption("No taxonomy skills detected in this resume. Use precise names like "
                        "“Python”, “SQL”, “Figma”.")
     with right:
         st.markdown(f"#### 🧾 The job asks for ({match.job_title or 'role'})")
-        for category, skills in sorted(match.jd_categories.items()):
-            if skills:
-                st.markdown(f"**{category}**")
-                st.markdown(components.skill_chips(skills, styles.C["accent"]), unsafe_allow_html=True)
-        if not match.jd_categories:
+        if match.jd_categories:
+            cards = "".join(
+                f"<div class='ri-card' style='padding:12px 16px;flex:1;min-width:200px;'>"
+                f"<div class='ri-eyebrow'>{components.esc(category)}</div>"
+                f"<div style='margin-top:6px;'>"
+                f"{components.skill_chips(skills, styles.C['highlight'])}</div></div>"
+                for category, skills in sorted(match.jd_categories.items()) if skills)
+            st.markdown(f"<div class='ri-flexwrap'>{cards}</div>", unsafe_allow_html=True)
+        else:
             st.caption("No taxonomy skills detected in this JD.")
 
     st.markdown("### Skill match detail")
     col1, col2, col3 = st.columns(3, gap="medium")
     with col1:
-        st.markdown("#### ✅ Matching")
-        st.markdown(components.skill_chips(match.matching, styles.C["green"]), unsafe_allow_html=True)
+        _skill_panel("✅ Matching", match.matching, styles.C["green"],
+                     f"{len(match.matching)} requirement(s) hit exactly")
     with col2:
-        st.markdown("#### 🟡 Partial")
-        st.markdown(components.skill_chips(match.partial, styles.C["amber"]), unsafe_allow_html=True)
-        st.caption("Related same-domain skills exist in your resume but the JD's exact term doesn't — "
-                   "consider using the JD wording when truthful.")
+        _skill_panel("🟡 Partial", match.partial, styles.C["amber"],
+                     "Related same-domain skills exist in your resume but the JD's exact term "
+                     "doesn't — consider using the JD wording when truthful.")
     with col3:
-        st.markdown("#### ❌ Missing")
-        st.markdown(components.skill_chips(match.missing, styles.C["red"]), unsafe_allow_html=True)
+        _skill_panel("❌ Missing", match.missing, styles.C["red"],
+                     "Absent from your resume — listed as gaps, never as your skills.")
 
     if match.jd_extra_keywords:
         st.markdown("#### 🔑 JD vocabulary not in your resume")
@@ -160,9 +177,9 @@ def _render_match() -> None:
         st.warning(f"🧮 The JD mentions roughly {match.min_years[0]}+ years of experience — "
                    f"only claim what you actually have.", icon="ℹ️")
     if match.degree_requirements:
-        st.caption("🎓 Education terms found in the JD: " +
-                   components.skill_chips(match.degree_requirements, styles.C["muted"], "14"),
-                   unsafe_allow_html=True)
+        st.markdown("🎓 **Education terms found in the JD:** " +
+                    components.skill_chips(match.degree_requirements, styles.C["muted"], "14"),
+                    unsafe_allow_html=True)
 
     st.markdown("#### 🧭 Notes & guidance")
     for note in match.notes:
@@ -174,15 +191,28 @@ def _render_match() -> None:
             icon="🧠")
 
 
+def _skill_panel(title: str, skills: list[str], color: str, note: str) -> None:
+    st.markdown(
+        f"<div class='ri-card' style='padding:14px 16px;height:100%;'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+        f"<span style='font-weight:700;font-size:14px;'>{components.esc(title)}</span>"
+        f"<span class='ri-mono' style='font-size:14px;font-weight:800;color:{color};'>"
+        f"{len(skills)}</span></div>"
+        f"<div style='margin-top:8px;'>{components.skill_chips(skills, color)}</div>"
+        f"<div style='color:{styles.C['muted']};font-size:11.5px;margin-top:8px;line-height:1.5;'>"
+        f"{components.esc(note)}</div></div>", unsafe_allow_html=True)
+
+
 def _render_info_card() -> None:
-    st.markdown(f"""<div style='background:{styles.C['card']};border:1px solid {styles.C['border']};
-      border-radius:18px;padding:24px;line-height:1.75;color:{styles.C['muted']};'>
-      <div style='font-weight:700;color:{styles.C['text']};'>How matching works</div>
+    c = styles.C
+    st.markdown(f"""<div class='ri-card' style='padding:20px 24px;line-height:1.8;color:{c['muted']};'>
+      <div style='font-weight:700;color:{c['text']};margin-bottom:6px;'>How matching works</div>
       <div>1 · Every taxonomy skill the job description asks for is detected from its text.</div>
       <div>2 · Your resume is scanned for the same skills.</div>
-      <div>3 · Skills absent from your resume are listed as <b>missing</b>, never as your skills.</div>
+      <div>3 · Skills absent from your resume are listed as <b style="color:{c['text']};">missing</b>,
+      never as your skills.</div>
       <div>4 · The match % weighs skill coverage (70%) and general JD keyword coverage (30%).
-      It is a <b>heuristic estimate</b>, not a guarantee.</div>
+      It is a <b style="color:{c['text']};">heuristic estimate</b>, not a guarantee.</div>
     </div>""", unsafe_allow_html=True)
 
 

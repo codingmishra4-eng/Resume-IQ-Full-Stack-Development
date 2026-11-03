@@ -30,16 +30,17 @@ def render() -> None:
     if _engine is None:
         _engine = ScoringEngine()
 
+    mode = "OpenAI narration" if _ai.ai_available else "rule-based fallback"
     components.page_title(
-        "AI Improve Assistant",
-        "Before/after rewrites — accept, reject, or edit each suggestion."
-        + ("" if _ai.ai_available else " *(running in rule-based mode)*"))
+        "AI Improve", "Before/after rewrites — accept, reject, or edit each suggestion.",
+        eyebrow=f"assistant · {mode}")
     if not _ai.ai_available:
         st.info("No `OPENAI_API_KEY` found — suggestions below come from ResumeIQ's "
                 "**deterministic rule engine** and always use `[placeholders]` for unknown "
-                "metrics. Add a key via `.env` to unlock OpenAI-powered rewrites.", icon="ℹ️")
+                "metrics. Add a key via `.env` (see the **Upgrade** page) to unlock "
+                "OpenAI-powered rewrites.", icon="ℹ️")
 
-    # ---------------- source selection -------------------------------------
+    # ---------------- source selection ---------------------------------------
     last = st.session_state.get("analysis")
     if last is not None and st.button(f"♻  Use last analyzed resume ({last.parsed.file_name})",
                                       use_container_width=True):
@@ -135,11 +136,11 @@ def _looks_like_weak_bullet(line: str) -> bool:
 
 
 def _info_card() -> None:
-    st.markdown(f"""<div style='background:{styles.C['card']};border:1px solid {styles.C['border']};
-      border-radius:18px;padding:22px;color:{styles.C['muted']};line-height:1.7;'>
-      <div style='font-weight:700;color:{styles.C['text']};'>What the assistant does</div>
-      <div>• Shows <b>before → after</b> comparisons; never modifies your stored files</div>
-      <div>• Rewrites bullets grounded in your <b>actual content</b> — unknown metrics become
+    c = styles.C
+    st.markdown(f"""<div class='ri-card' style='padding:20px 24px;color:{c['muted']};line-height:1.8;'>
+      <div style='font-weight:700;color:{c['text']};margin-bottom:6px;'>What the assistant does</div>
+      <div>• Shows <b style="color:{c['text']};">before → after</b> comparisons; never modifies your stored files</div>
+      <div>• Rewrites bullets grounded in your <b style="color:{c['text']};">actual content</b> — unknown metrics become
       <code>[X%]</code> placeholders you fill in with real numbers</div>
       <div>• Swaps weak phrases (“responsible for”, “worked on”) for stronger verbs</div>
       <div>• Suggests keyword weaving only for skills you actually listed</div>
@@ -149,7 +150,7 @@ def _info_card() -> None:
 def _render_bundle() -> None:
     bundle = st.session_state.get("improve_bundle") or {}
 
-    st.markdown("### 1 · Professional summary")
+    components.section_title("1 · Professional summary")
     summary = bundle.get("summary")
     if summary:
         _suggestion_block(summary.original, summary.improved, summary.rationale,
@@ -159,7 +160,7 @@ def _render_bundle() -> None:
     else:
         st.info("Add a summary section first, then suggest improvements again.")
 
-    st.markdown("### 2 · Weak bullet fixes")
+    components.section_title("2 · Weak bullet fixes")
     bullets = bundle.get("bullets") or []
     if bullets:
         for idx, sug in enumerate(bullets):
@@ -170,14 +171,14 @@ def _render_bundle() -> None:
 
     verbs = bundle.get("verbs") or []
     if verbs:
-        st.markdown("### 3 · Stronger verbs & phrasing")
+        components.section_title("3 · Stronger verbs & phrasing")
         for idx, sug in enumerate(verbs[:8]):
             _suggestion_block(sug.original, sug.improved, sug.rationale,
                               sug.source, key=f"verb_{idx}")
 
     missing = bundle.get("missing") or []
     if missing:
-        st.markdown("### 4 · Closing JD skill gaps (truthfully)")
+        components.section_title("4 · Closing JD skill gaps (truthfully)")
         st.markdown("Missing skills found in the JD: " +
                     components.skill_chips(missing, styles.C["red"]), unsafe_allow_html=True)
         guidance = _ai.keyword_guidance(missing, st.session_state.get("imp_jd", "") or "",
@@ -188,28 +189,28 @@ def _render_bundle() -> None:
 
 def _suggestion_block(original: str, improved: str, rationale: str,
                       source: str, key: str, empty_note: str = "") -> None:
+    c = styles.C
     badge = ("🤖 OpenAI" if source == "openai" else "⚙️ Rule-based")
-    color = styles.C["accent2"] if source == "openai" else styles.C["amber"]
+    color = c["accent2"] if source == "openai" else c["amber"]
+    red, green = c["red"], c["green"]
     st.markdown(f"""
-<div style='background:{styles.C['card']};border:1px solid {styles.C['border']};
-     border-radius:14px;padding:14px 16px;margin:10px 0;'>
-  <div style='display:flex;justify-content:flex-end;margin-bottom:6px;'>
-    <span style='background:{color}22;color:{color};font-size:11px;font-weight:700;
-      padding:3px 10px;border-radius:99px;border:1px solid {color}55;'>{badge}</span>
+<div class="ri-card" style="padding:14px 16px;margin:10px 0;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <div class="ri-eyebrow">suggestion #{key.split('_')[-1]}</div>
+    <span style="background:{color}1e;color:{color};font-size:10.5px;font-weight:700;
+      padding:3px 10px;border-radius:99px;border:1px solid {color}55;letter-spacing:.08em;">{badge}</span>
   </div>
-  <div style='display:grid;grid-template-columns:1fr;gap:8px;'>
-    <div style='background:rgba(255,107,129,.07);border:1px solid rgba(255,107,129,.25);
-      border-radius:12px;padding:10px 14px;'>
-      <div style='font-size:10.5px;color:{styles.C['red']};letter-spacing:.1em;'>BEFORE</div>
-      <div style='font-size:13.5px;margin-top:4px;'>{components.esc((original or '—')[:600])}</div>
+  <div style="display:grid;grid-template-columns:1fr;gap:8px;">
+    <div style="background:{red}0a;border-left:3px solid {red}88;border-radius:10px;padding:10px 14px;">
+      <div style="font-size:10.5px;color:{red};letter-spacing:.12em;font-weight:700;">BEFORE</div>
+      <div style="font-size:13.5px;margin-top:4px;">{components.esc((original or '—')[:600])}</div>
     </div>
-    <div style='background:rgba(45,212,167,.07);border:1px solid rgba(45,212,167,.3);
-      border-radius:12px;padding:10px 14px;'>
-      <div style='font-size:10.5px;color:{styles.C['green']};letter-spacing:.1em;'>AFTER</div>
-      <div style='font-size:13.5px;margin-top:4px;white-space:pre-wrap;'>{components.esc((improved or '—')[:900])}</div>
+    <div style="background:{green}0a;border-left:3px solid {green}88;border-radius:10px;padding:10px 14px;">
+      <div style="font-size:10.5px;color:{green};letter-spacing:.12em;font-weight:700;">AFTER</div>
+      <div style="font-size:13.5px;margin-top:4px;white-space:pre-wrap;">{components.esc((improved or '—')[:900])}</div>
     </div>
   </div>
-  <div style='font-size:12px;color:{styles.C['muted']};margin-top:6px;'>{components.esc(empty_note or rationale)}</div>
+  <div style="font-size:12px;color:{c['muted']};margin-top:8px;">{components.esc(empty_note or rationale)}</div>
 </div>""", unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns([1, 1, 2.4])
