@@ -92,14 +92,14 @@ def _brand_bar() -> None:
       <div style="font-size:21px;font-weight:800;letter-spacing:-0.02em;">{config.APP_NAME}
         <span style="color:{styles.C['muted']};font-weight:500;font-size:12px;
               margin-left:2px;">v{config.APP_VERSION}</span></div>
-      <div style="color:{styles.C['muted']};font-size:12px;">{config.APP_TAGLINE}</div>
+      <div class="ri-brand-tagline" style="color:{styles.C['muted']};font-size:12px;">{config.APP_TAGLINE}</div>
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:8px;">
     <span class="ri-badge" style="color:{styles.C['green']};background:{styles.C['green']}14;
           border:1px solid {styles.C['green']}44;">
       <span class="ri-dot" style="background:{styles.C['green']};"></span>local-first</span>
-    <span style="color:{styles.C['muted']};font-size:12px;">your resume stays on your device</span>
+    <span class="ri-brand-sub" style="color:{styles.C['muted']};font-size:12px;">your resume stays on your device</span>
   </div>
 </div>""",
         unsafe_allow_html=True)
@@ -118,7 +118,7 @@ def _nav_bar() -> None:
                 st.session_state.nav = page
                 st.rerun()
     st.markdown(
-        f"<div style='color:{styles.C['muted']};font-size:11.5px;"
+        f"<div class='ri-nav-desc' style='color:{styles.C['muted']};font-size:11.5px;"
         f"margin:2px 0 8px;'>{_desc(st.session_state.nav)}</div>",
         unsafe_allow_html=True)
 

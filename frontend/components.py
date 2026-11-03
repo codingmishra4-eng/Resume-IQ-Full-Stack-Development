@@ -59,7 +59,7 @@ def score_ring(score: float, caption: str = "Estimated ATS score") -> None:
     note_color = _score_color(score)
     st.markdown(
         f"""
-<div class="main-enter ri-card" style="display:flex;align-items:center;gap:30px;flex-wrap:wrap;
+<div class="main-enter ri-card ri-ringcard" style="display:flex;align-items:center;gap:30px;flex-wrap:wrap;
   padding:24px 30px;">
   {_ring_svg(score, sublabel='/ 100')}
   <div style="flex:1;min-width:240px;">
@@ -272,7 +272,8 @@ def data_table(headers: list[str], rows: list[list[str]]) -> str:
     """Design-system table:(headers → text, rows → ready HTML cells)."""
     thead = "".join(f"<th>{esc(h)}</th>" for h in headers)
     trs = "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in r) + "</tr>" for r in rows)
-    return f"<table class='ri-table'><thead><tr>{thead}</tr></thead><tbody>{trs}</tbody></table>"
+    return (f"<div class='ri-tbl-scroll'><table class='ri-table'>"
+            f"<thead><tr>{thead}</tr></thead><tbody>{trs}</tbody></table></div>")
 
 
 # --------------------------------------------------------------------------- #

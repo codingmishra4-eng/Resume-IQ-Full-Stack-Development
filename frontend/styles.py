@@ -292,15 +292,75 @@ div[data-testid="stFileUploader"] button {{ width: 100%; }}
   -webkit-font-smoothing: antialiased;
 }}
 
-/* ---- responsive safety ----
-   Never allow horizontal overflow; stack flex rows on small screens. */
+/* ---- responsive / device adaptation -------------------------------
+   Laptop: default layout. ≤1100px: Streamlit columns reflow into wrapped
+   tiles instead of being squeezed. ≤640px (phones): compact paddings,
+   scaled typography, hidden extras, full-width tiles, scrollable tables. */
 .block-container {{ padding-left: 1.5rem !important; padding-right: 1.5rem !important; }}
 .ri-flexwrap {{ display: flex; flex-wrap: wrap; gap: 14px; }}
-@media (max-width: 900px) {{
-  .ri-4col, .ri-3col {{ flex-direction: column; }}
-  div[data-testid="column"] {{ min-width: 0; }}
-  table.ri-table {{ font-size: 12.5px; }}
-  .stApp div[data-testid="stHorizontalBlock"] {{ overflow-x: hidden; }}
+.stApp {{ overflow-x: hidden; }}
+
+/* tables scroll horizontally in a wrapper instead of being crushed */
+.ri-tbl-scroll {{ overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }}
+.ri-tbl-scroll > table.ri-table {{ min-width: 540px; }}
+
+/* tab strips scroll instead of clipping */
+div.stTabs [data-baseweb="tab-list"] {{ overflow-x: auto; }}
+
+/* ---- tablet range (641–1100px) ---- */
+@media (min-width: 641px) and (max-width: 1100px) {{
+  .stApp div[data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; }}
+  .stApp div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {{
+    flex: 1 1 240px !important;
+    min-width: 240px !important;
+  }}
+  .ri-nav-desc {{ display: none; }}
+}}
+
+/* ---- phones (≤640px) ---- */
+@media (max-width: 640px) {{
+  .block-container {{
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    padding-top: 0.9rem !important;
+    max-width: 100% !important;
+  }}
+  /* Streamlit stacks columns vertically here; give every tile full width */
+  .stApp div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {{
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }}
+  .stApp div[data-testid="stHorizontalBlock"] {{ gap: 0.55rem; }}
+
+  .ri-title {{ font-size: 22px !important; }}
+  .ri-subtitle {{ font-size: 12.5px !important; }}
+  .ri-card, .ri-elevated {{ border-radius: 13px; }}
+
+  .stButton > button {{ padding: 9px 14px; font-size: 13px; border-radius: 10px; min-height: 42px; }}
+  .stDownloadButton > button {{ padding: 10px 14px; min-height: 42px; }}
+
+  .ri-stat, .ri-action {{ min-width: 100%; }}
+  .ri-card {{ padding: 14px !important; }}
+  .ri-brand-tagline, .ri-brand-sub, .ri-nav-desc {{ display: none; }}
+  .ri-ringcard svg {{ width: 128px !important; height: 128px !important; }}
+
+  table.ri-table {{ font-size: 12px; }}
+  table.ri-table th, table.ri-table td {{ padding: 8px 9px; }}
+
+  div[data-testid="stFileUploaderDropzone"] {{ padding: 8px !important; }}
+
+  /* the big mono numbers shrink a touch */
+  .ri-mono {{ font-size: clamp(18px, 5.4vw, 25px); }}
+
+  h1, h2 {{ font-size: 1.35rem !important; }}
+  h3, h4 {{ font-size: 1.1rem !important; }}
+}}
+
+/* very narrow phones (≤380px) — pull everything in a little more */
+@media (max-width: 380px) {{
+  .block-container {{ padding-left: 0.7rem !important; padding-right: 0.7rem !important; }}
+  .ri-title {{ font-size: 20px !important; }}
 }}
 
 </style>
