@@ -1,71 +1,36 @@
+"""Compatibility entry point: uvicorn backend.api:app."""
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from dataclasses import asdict
+from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
-import config
-from backend.resume_parser import ResumeParser, ParseError
-
-
-app = FastAPI(
-    title="ResumeIQ API",
-    description="Backend API for ResumeIQ",
-    version="1.0.0"
-)
+from backend.api_v1.errors import register_error_handlers
+from backend.api_v1.middleware import UploadBodyLimitMiddleware
+from backend.api_v1.router import router
+from backend.api_v1.settings import APISettings
 
 
-@app.get("/")
-def home():
-    return {"message": "Welcome to ResumeIQ API"}
-
-
-@app.get("/api/health")
-def health_check():
-    return {
-        "status": "ok",
-        "application": "ResumeIQ"
-    }
-
-
-@app.post("/api/resume/upload")
-async def upload_resume(file: UploadFile = File(...)):
-
-    file_name = file.filename or ""
-
-    # Check file extension before reading
-    suffix = (
-        "." + file_name.rsplit(".", 1)[-1].lower()
-        if "." in file_name else ""
+def create_app(settings: APISettings | None = None) -> FastAPI:
+    settings = settings or APISettings.from_env()
+    application = FastAPI(
+        title="ResumeIQ API",
+        description="Backend API for ResumeIQ (Phase 1; authentication not implemented)",
+        version="1.0.0",
     )
+    application.state.api_settings = settings
+    register_error_handlers(application)
+    application.include_router(router)
+    application.add_middleware(
+        UploadBodyLimitMiddleware, max_bytes=settings.max_upload_bytes + 64 * 1024,
+    )
+    # CORS wraps the body guard, including its early rejection responses.
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
+    return application
 
-    if suffix not in config.ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="Please upload a PDF or DOCX resume."
-        )
 
-    try:
-        # Read only up to the allowed size + 1 byte
-        data = await file.read(int(config.MAX_UPLOAD_BYTES) + 1)
-
-        # Reuse existing parser
-        parsed = ResumeParser().parse(data, file_name)
-
-        # Convert ParsedResume dataclass into JSON-compatible dict
-        result = asdict(parsed)
-
-        # Avoid returning full resume text in the API response
-        result.pop("text", None)
-
-        return {
-            "success": True,
-            "resume": result
-        }
-
-    except ParseError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc)
-        ) from exc
-
-    finally:
-        await file.close()
+app = create_app()
