@@ -137,9 +137,12 @@ def test_private_upload_and_ownership(cloud, pdf_bytes):
     assert client.get('/api/v1/resumes/' + id).status_code == 404
 
 
+# Keep payloads out of node IDs: pytest puts the current node ID in an
+# environment variable, whose value is limited to 32,767 characters on Windows.
 @pytest.mark.parametrize('filename,data,code', [('a.exe', b'x', 'unsupported_format'),
     ('a.pdf', b'', 'empty_file'), ('a.pdf', b'corrupt', 'invalid_file'),
-    ('a.docx', b'PKfake', 'invalid_file'), ('a.pdf', b'x' * (10*1024*1024+1), 'file_too_large')])
+    ('a.docx', b'PKfake', 'invalid_file'), ('a.pdf', b'x' * (10*1024*1024+1), 'file_too_large')],
+    ids=['unsupported-extension', 'empty-pdf', 'corrupt-pdf', 'corrupt-docx', 'oversized-pdf'])
 def test_private_invalid_files(cloud, filename, data, code):
     client, db, storage, user, _ = cloud
     response = client.post('/api/v1/resumes', files={'file': (filename, data)})
