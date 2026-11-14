@@ -25,7 +25,10 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         if isinstance(exc, APIError):
-            return error_response(exc.status_code, exc.code, exc.detail)
+            response = error_response(exc.status_code, exc.code, exc.detail)
+            if exc.headers:
+                response.headers.update(exc.headers)
+            return response
         # Multipart parser exceptions can contain attacker-controlled input.
         messages = {400: "Malformed request.", 404: "Not found.", 405: "Method not allowed."}
         response = error_response(exc.status_code, "http_error", messages.get(exc.status_code, "Request failed."))
