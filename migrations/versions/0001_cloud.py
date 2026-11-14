@@ -24,13 +24,41 @@ def upgrade():
                        sa.Column('resource_id', sa.Uuid(), nullable=False)]
         else:
             fields += [sa.Column('summary_json' if table == 'cloud_analyses' else 'data_json', sa.JSON(), nullable=False)]
-        op.create_table(table, *fields)
-        op.create_index('ix_' + table + '_user_id', table, ['user_id'])
-        op.execute(f'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY')
-        op.execute(f'ALTER TABLE {table} FORCE ROW LEVEL SECURITY')
-        op.execute(f"CREATE POLICY owner_access ON {table} USING (user_id = NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid) WITH CHECK (user_id = NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid)")
+        op.create_table(table, *fields, schema='public')
+        op.create_index('ix_' + table + '_user_id', table, ['user_id'], schema='public')
+        op.execute(f'ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY')
+        op.execute(f'ALTER TABLE public.{table} FORCE ROW LEVEL SECURITY')
+        # TO PUBLIC is safe here: the role-name condition denies every role but
+        # the dedicated backend. The role need not exist at migration time.
+        owner = "current_user = 'resumeiq_runtime' AND user_id = NULLIF(current_setting('resumeiq.user_id', true), '')::uuid"
+        op.execute(f"CREATE POLICY owner_access ON public.{table} USING ({owner}) WITH CHECK ({owner})")
+    # Supabase may grant new public tables to Data API roles through default
+    # privileges. Revoke *after creation*, including Alembic's version table.
+    # Never change default privileges/schema ACLs for unrelated applications.
+    for table in (*TABLES, 'alembic_version'):
+        op.execute(f'REVOKE ALL PRIVILEGES ON TABLE public.{table} FROM PUBLIC')
+        op.execute(f"""
+            DO $acl$
+            DECLARE role_name text;
+            BEGIN
+                FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
+                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+                        EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE public.%I FROM %I', '{table}', role_name);
+                        -- REVOKE cannot remove inherited privileges or superuser
+                        -- access. Abort atomically rather than claim isolation.
+                        IF has_table_privilege(role_name, 'public.{table}',
+                            'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                           OR pg_has_role(role_name,
+                               (SELECT pg_get_userbyid(relowner) FROM pg_class
+                                WHERE oid = 'public.{table}'::regclass), 'MEMBER') THEN
+                            RAISE EXCEPTION 'Data API role retains cloud table privileges; review role memberships';
+                        END IF;
+                    END IF;
+                END LOOP;
+            END $acl$;
+        """)
 
 
 def downgrade():
     for table in reversed(TABLES):
-        op.drop_table(table)
+        op.drop_table(table, schema='public')

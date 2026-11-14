@@ -234,12 +234,12 @@ def test_storage_refuses_public_bucket():
 def test_migration_offline_sql():
     import subprocess, os
     result = subprocess.run([os.sys.executable, '-m', 'alembic', 'upgrade', 'head', '--sql'],
-                            env=os.environ | {'CLOUD_DATABASE_URL': 'postgresql+psycopg://test@localhost/db'},
+                            env=os.environ | {'CLOUD_MIGRATION_DATABASE_URL': 'postgresql+psycopg://test@localhost/db'},
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     for table in ['cloud_resumes', 'cloud_analyses', 'cloud_saved_resumes', 'cloud_history']:
-        assert f'CREATE TABLE {table}' in result.stdout
-        assert f'ALTER TABLE {table} FORCE ROW LEVEL SECURITY' in result.stdout
+        assert f'CREATE TABLE public.{table}' in result.stdout
+        assert f'ALTER TABLE public.{table} FORCE ROW LEVEL SECURITY' in result.stdout
     assert 'WITH CHECK' in result.stdout
 
 
@@ -473,3 +473,35 @@ def test_modern_secret_http_contract_and_privacy(cloud, pdf_bytes, monkeypatch, 
     prefixes = json.loads(deleted.content)['prefixes']
     assert len(prefixes) == 1 and prefixes[0].startswith(str(user.id) + '/')
     assert deleted.url.path == '/storage/v1/object/resumes'
+
+
+@pytest.mark.parametrize('migration_url', [None, 'sqlite:///must-not-migrate.db'],
+                         ids=['missing-admin-url', 'sqlite-rejected'])
+def test_migration_never_falls_back_to_runtime_url(migration_url):
+    import os
+    import subprocess
+    env = os.environ | {'CLOUD_DATABASE_URL': 'postgresql+psycopg://test@localhost/db'}
+    env.pop('CLOUD_MIGRATION_DATABASE_URL', None)
+    if migration_url is not None:
+        env['CLOUD_MIGRATION_DATABASE_URL'] = migration_url
+    result = subprocess.run([os.sys.executable, '-m', 'alembic', 'upgrade', 'head', '--sql'],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert ('CLOUD_MIGRATION_DATABASE_URL' if migration_url is None else 'Migrations require PostgreSQL') in result.stderr
+
+
+def test_documented_dotenv_migration_command_offline(tmp_path):
+    import os
+    import subprocess
+    env_file = tmp_path / '.env'
+    env_file.write_text('CLOUD_ENABLED=false\nCLOUD_MIGRATION_DATABASE_URL=postgresql+psycopg://synthetic@localhost/test_only\n')
+    env = os.environ.copy()
+    env.pop('CLOUD_MIGRATION_DATABASE_URL', None)
+    result = subprocess.run([os.sys.executable, '-c',
+        "from dotenv import load_dotenv; from alembic.config import main; "
+        f"load_dotenv({str(env_file)!r}, override=False); main(argv=['upgrade','head','--sql'])"],
+        env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert 'REVOKE ALL PRIVILEGES ON TABLE public.cloud_resumes FROM PUBLIC' in result.stdout
+    assert "current_user = 'resumeiq_runtime'" in result.stdout
+    assert 'synthetic@localhost' not in result.stdout

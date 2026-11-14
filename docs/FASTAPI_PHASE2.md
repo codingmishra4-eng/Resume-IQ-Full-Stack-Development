@@ -91,7 +91,8 @@ unchanged. The cloud database is never used implicitly by local business engines
 | `SUPABASE_JWT_AUDIENCE` | Typically `authenticated`, explicitly required |
 | `SUPABASE_JWKS_URL` | Exactly `${SUPABASE_JWT_ISSUER}/.well-known/jwks.json` |
 | `SUPABASE_JWT_ALGORITHM` | Exactly `ES256` or `RS256`, matching signing key |
-| `CLOUD_DATABASE_URL` | `postgresql+psycopg://...`; use TLS with `?sslmode=verify-full` and trusted CA in production |
+| `CLOUD_DATABASE_URL` | API-only `resumeiq_runtime` PostgreSQL connection; use TLS with `?sslmode=verify-full` and a trusted CA in production |
+| `CLOUD_MIGRATION_DATABASE_URL` | Separate operator/admin connection for Alembic and cross-user maintenance; required by migration commands even while CLOUD_ENABLED=false; omit from deployed API secrets |
 | `SUPABASE_STORAGE_BUCKET` | Private bucket ID, lowercase alphanumeric, hyphen/underscore |
 | `SUPABASE_SECRET_KEY` | Backend-only modern `sb_secret_` Storage API key; required, never a publishable key or JWT |
 | `API_ALLOWED_ORIGINS` | Existing comma-separated exact HTTP(S) origins; no wildcard |
@@ -139,8 +140,9 @@ SQLite. Database passwords with special characters must be URL-encoded.
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-api.txt
-# Export cloud settings securely before migrations/startup.
+# Export CLOUD_MIGRATION_DATABASE_URL securely for explicit DDL.
 python -m alembic upgrade head
+# Use the separate runtime CLOUD_DATABASE_URL for API startup.
 python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000
 ```
 
@@ -171,22 +173,150 @@ Analyses/saved-builder CRUD is available as an internal persistence API; this ph
 does not add an analysis-generation or builder HTTP endpoint or import local
 history. Analysis list/detail responses explicitly expose only ID/time/ATS score.
 
-Alembic enables and forces RLS with USING and WITH CHECK owner policies using
-`request.jwt.claim.sub`. With no setting, a nonprivileged role sees no rows. The
-current FastAPI connection uses a **trusted backend role with BYPASSRLS**, so every
-ORM query must retain its owner predicate; the backend does not impersonate users
-with database session settings. Provision a separate runtime role with LOGIN and
-BYPASSRLS, grant schema USAGE plus SELECT/INSERT/UPDATE/DELETE on only the four
-cloud tables; use a separate migration-owner credential for DDL. Keep both out of
-clients. A runtime role without BYPASSRLS will fail closed, not transparently work.
-Do not grant these tables to anon/authenticated or expose them via public Data API
-schemas. A BYPASSRLS credential compromise defeats database isolation. The RLS
-test sets a transaction-local UUID only to verify policies with a restricted role.
+Alembic enables and forces RLS on all four cloud tables. Both USING and WITH
+CHECK require `current_user = 'resumeiq_runtime'` and an owner matching the
+transaction-local `resumeiq.user_id` UUID. Missing identity yields no rows and
+rejects writes. Invalid identity fails the query. The role-name predicate makes
+the policy deny other roles even if they are accidentally granted DML (except
+roles with BYPASSRLS/superuser privileges, which ignore policies).
 
-Migration commands use `CLOUD_DATABASE_URL` only; SQLite is rejected. Startup
-never runs migrations. Review/back up before production DDL. `alembic downgrade
-base` **destroys cloud records**, so use it only in a disposable test database or
-an approved rollback. It never touches existing local SQLite files/tables.
+The migration explicitly revokes **ALL table privileges** from PUBLIC and each
+existing `anon`, `authenticated`, `service_role`, including `public.alembic_version`.
+It checks effective privileges after revocation and aborts transactionally if
+inherited/admin access remains. This is essential for `service_role`, which
+bypasses RLS. Absent Supabase roles are skipped, so plain PostgreSQL needs no
+Supabase functions or role provisioning. Policies do not require the runtime role
+to exist when migrating. Tables and Alembic version tracking are explicitly in
+`public`; ORM statements qualify this schema on PostgreSQL to prevent search-path
+or temporary-table shadowing. Default privileges and unrelated objects are left
+unchanged. Keep Data API exposure disabled as a separate defense.
+
+The runtime has **NOBYPASSRLS**, and application owner predicates are still
+required. `CloudDatabase.for_user()` creates an immutable request-local session
+factory. Each PostgreSQL transaction sets the verified UUID with parameterized
+`set_config(..., true)`, which has SET LOCAL lifetime; commit/rollback clear it.
+An unscoped session explicitly clears identity and fails closed. All API database
+transactions, including upload finalization, cleanup compensation and delete
+history, use the same verified user scope. Independent requests never mutate a
+shared identity. Local SQLite and Streamlit sessions do not run this hook.
+
+This setting is not an independent authentication mechanism: a compromised
+runtime DB credential or SQL injection could set a different UUID. Only the
+trusted backend receives this credential; users cannot submit SQL or identity
+settings. JWT verification, parameterized queries and ownership checks remain
+mandatory. The Data API roles and PUBLIC must not receive runtime membership,
+DML grants or runtime credentials.
+
+Migrations use **CLOUD_MIGRATION_DATABASE_URL only**. No fallback to the API's
+CLOUD_DATABASE_URL, no implicit SQLite migration and no startup DDL occur. Use a
+separate table-owning/admin role for migrations. The migration creates no roles,
+users or passwords and grants no runtime privileges automatically. The reviewed
+operator script is [sql/phase2_runtime.sql](sql/phase2_runtime.sql).
+
+Revision `0001_cloud` was hardened before this project's first application. If
+an installation already stamped an older copy of `0001_cloud`, `upgrade head`
+will not re-run it: prepare a new forward migration for that installation; do
+not edit Alembic stamps or downgrade a populated database. `downgrade base`
+**destroys cloud tables**, and belongs only in disposable tests or an approved
+rollback. Never use the disposable integration tests on a live Supabase project.
+
+### Dedicated runtime role and hosted Supabase
+
+Use `resumeiq_runtime` with LOGIN only when its password has been securely
+provisioned; NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOINHERIT, NOREPLICATION and
+NOBYPASSRLS. It must not own tables, schemas or databases and must have no parent
+role memberships. Required grants are CONNECT to the target database, USAGE on
+public, and SELECT/INSERT/UPDATE/DELETE on only the four cloud tables. UUID keys
+need no sequence grants. No Alembic table access, schema CREATE, DDL, TRUNCATE,
+REFERENCES, TRIGGER, grant option or Auth/Storage-schema grants are needed.
+
+The operator script validates administrative flags, unsafe memberships and
+schema CREATE privileges before granting DML. It aborts if public schema CREATE
+is inherited through PUBLIC; audit/fix schema ACLs with an operator rather than
+revoking global privileges blindly and breaking unrelated Supabase applications.
+Audit other existing PUBLIC grants/security-definer functions as well: a role
+cannot opt out of privileges granted to PUBLIC. The script limits new grants to
+ResumeIQ; it does not claim to isolate arbitrary existing public-schema code.
+
+CREATEROLE and the admin's own BYPASSRLS flag are not sufficient evidence that
+hosted Supabase will allow provisioning another bypass role. PostgreSQL 15's
+rules require superuser for BYPASSRLS; newer versions permit it for suitably
+privileged bypass roles, with additional role-administration requirements for
+ALTER ROLE. Hosted restrictions can further limit this. Supabase's `postgres`
+is managed, not an unrestricted superuser. **Do not test this by granting bypass
+in production, grant `service_role` membership, or fall back to admin credentials
+in FastAPI.** The supported secure alternative is the NOBYPASSRLS runtime and
+transaction-scoped policy described above; no bypass grant is necessary.
+
+References: [PostgreSQL 15 CREATE ROLE](https://www.postgresql.org/docs/15/sql-createrole.html),
+[current CREATE ROLE](https://www.postgresql.org/docs/current/sql-createrole.html),
+[Supabase roles](https://supabase.com/docs/guides/database/postgres/roles),
+[Supabase inherited privileges](https://supabase.com/kb/troubleshooting/custom-role-inherits-privileges-that-were-not-explicitly-granted-ddaa1c).
+
+### Exact Windows CMD procedure (operator actions, not executed by this PR)
+
+Keep CLOUD_ENABLED=false and Data API automatic exposure disabled throughout
+setup. Review backups/target project and the generated migration SQL first. Do
+not paste passwords, URLs or keys into chat, shell history or PR comments.
+
+1. In your local, ignored `.env`, privately configure CLOUD_MIGRATION_DATABASE_URL
+   for your tested migration/admin connection. Reserve CLOUD_DATABASE_URL for
+   the dedicated runtime, not that admin. Keep the migration URL out of the
+   deployed API environment. Use the tested direct or session-pooler connection
+   and TLS; provider pooler login formats may differ from the PostgreSQL role name.
+2. Open **CMD**, from the repository root (adjust the path locally):
+
+```bat
+cd /d C:\path\to\Resume-IQ-Full-Stack-Development
+.venv\Scripts\activate.bat
+python -m pip install -r requirements-api.txt
+python -c "from dotenv import load_dotenv; from alembic.config import main; load_dotenv('.env', override=False); main(argv=['history'])"
+if not exist work mkdir work
+python -c "from dotenv import load_dotenv; from alembic.config import main; load_dotenv('.env', override=False); main(argv=['upgrade','head','--sql'])" > work\phase2-migration.sql
+```
+
+Review `work\phase2-migration.sql`. The offline command does not connect to the
+database. It contains DDL/privileges but no connection password. Existing process
+environment variables take precedence over `.env`; use a fresh CMD window and
+remove stale overrides privately before proceeding. The next command **writes
+the selected database**; run it yourself only after review:
+
+```bat
+python -c "from dotenv import load_dotenv; from alembic.config import main; load_dotenv('.env', override=False); main(argv=['upgrade','head'])"
+python -c "from dotenv import load_dotenv; from alembic.config import main; load_dotenv('.env', override=False); main(argv=['current'])"
+```
+
+3. As an authorized database operator, provision the runtime role separately.
+   Example reviewed DDL (no password, initially NOLOGIN):
+
+```sql
+CREATE ROLE resumeiq_runtime NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+    NOINHERIT NOREPLICATION NOBYPASSRLS;
+```
+
+Do not recreate an existing role; inspect its attributes/memberships first. The
+migration and Python code do not run this statement. Run the reviewed contents
+of `docs/sql/phase2_runtime.sql` through your admin SQL client to grant only the
+required schema/table access. Separately grant CONNECT on the target database
+if not already allowed (using its actual name). Provision a strong password
+through a trusted tool's secure prompt, e.g. `\password resumeiq_runtime` in an
+already securely configured admin `psql` session. Do not put the password in SQL
+text or command arguments. Then explicitly `ALTER ROLE resumeiq_runtime LOGIN;`.
+Supabase may require the operator's admin role to SET ROLE or adjust membership
+administration rights; do not grant runtime membership to Data API roles.
+4. Review/run [sql/phase2_verify_permissions.sql](sql/phase2_verify_permissions.sql)
+   as admin. Expect no PUBLIC/Data API table grants, runtime DML only, no runtime
+   bypass/admin attributes, and RLS/FORCE RLS on all four tables. If an inherited
+   grant causes migration to fail, review that membership with the operator;
+   do not ignore the error, disable RLS or broadly revoke unrelated app grants.
+5. Privately configure CLOUD_DATABASE_URL for runtime, remove admin credentials
+   from the API environment, and confirm `current_user = resumeiq_runtime` and
+   `rolbypassrls = false` using your trusted DB client. Do not use anon,
+   authenticated, service_role or postgres as the runtime login. Test a valid
+   token plus two distinct users' upload/list/download/delete against staging
+   before enabling CLOUD_ENABLED=true for production. Never run this repository's
+   destructive PostgreSQL integration test against Supabase.
+
 
 ## API contracts
 
@@ -259,6 +389,10 @@ For failed/crashed operations, **stop API traffic**, then run:
 python -m backend.cloud.cleanup
 ```
 
+Load operator environment variables first, including CLOUD_MIGRATION_DATABASE_URL
+and the Storage settings (the module does not implicitly read `.env`). Cross-user
+maintenance requires the separately managed admin/bypass connection, not the
+unscoped NOBYPASSRLS runtime; keep it outside the deployed API environment.
 It retries cleanup of pending/deleting rows older than 24h with row locks,
 retaining intents on errors and printing only counts. Never run against active
 uploads; quiescing avoids upload/cleanup races. Monitor pending/deleting counts
@@ -286,7 +420,8 @@ TEST_POSTGRES_URL=postgresql+psycopg://postgres@localhost:55432/resumeiq python 
 Local tests use real locally generated ES256/RS256 JWT signatures, mocked JWKS
 retrieval and Storage, and SQLite fixtures for fast cloud ORM tests. Opt-in
 PostgreSQL testing actually upgrades/downgrades/re-upgrades Alembic, exercises
-CRUD ownership and verifies RLS using a restricted role. Without its environment
+CRUD ownership, Data API/PUBLIC ACL denial, inherited-grant rejection, and
+NOBYPASSRLS request isolation using NOLOGIN disposable roles. Without its environment
 variable it is explicitly skipped. No live Supabase credentials/project were
 available: real JWKS rotation, login/refresh, bucket access policies, signed
 URL downloads and Storage failure semantics still need project integration tests.
@@ -301,7 +436,7 @@ exhaustion. No deployment is performed by this change.
 
 Further limits: no malware scanner, process sandbox, account cleanup webhook,
 per-user storage quota, immediate access-token revocation, integration CI secret
-management or production observability. Storage secret keys and BYPASSRLS roles
+management or production observability. Storage secret keys and the migration/admin credentials
 are powerful credentials. Review grants, backups, encryption/TLS, project region,
 retention requirements and Supabase integration before production use. Unit tests
 and a disposable PostgreSQL test do not certify production security or browser UI.
@@ -325,3 +460,22 @@ On CPython 3.12.14/Linux: `python -m pytest -ra` passed 147 tests with 0 failure
 no broken requirements and `python smoke_test.py` exited 0 with `SMOKE OK`.
 The modern-key HTTP contract and success/error response/log privacy tests use
 HTTPX MockTransport and synthetic credentials, not a live Supabase project.
+
+### Migration/runtime hardening verification (2026-11-15)
+
+On CPython 3.12.14/Linux with explicitly local disposable PostgreSQL 17:
+`python -m pytest -ra` completed with **162 passed, 0 failed, 0 skipped, 0 errors**.
+`python -m pip check` reported no broken requirements. `python smoke_test.py`
+exited 0 with `SMOKE OK`. No Supabase connection, live migration, real login
+user creation or deployment was performed. The integration fixture creates only
+synthetic NOLOGIN roles in its disposable container.
+
+Coverage includes plain PostgreSQL without Supabase roles; Supabase-like
+new-table/default ACLs; transactional rejection of inherited Data API access;
+PUBLIC and all three Data API roles denied cloud/Alembic-table privileges,
+including the bypass service_role; restricted runtime grants; per-table RLS
+read/write/ownership reassignment denial; identity reset and concurrent user
+isolation; row locks; schema shadowing; authenticated upload/history/delete
+through a NOBYPASSRLS connection; offline dotenv-loaded migration commands and
+separate migration URL enforcement. Windows CMD syntax is documented, but native
+Windows and live Supabase provisioning are not claimed as verified here.

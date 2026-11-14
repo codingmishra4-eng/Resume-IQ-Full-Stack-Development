@@ -1,4 +1,5 @@
 """Manual interrupted-operation reconciliation. Run with API traffic stopped."""
+import os
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from backend.cloud.settings import CloudSettings
@@ -26,7 +27,12 @@ if __name__ == '__main__':
     settings = CloudSettings.from_env()
     if settings is None:
         raise SystemExit('Enable cloud mode before reconciliation')
-    db = CloudDatabase(settings.database_url)
+    # Cross-user maintenance needs the separately managed migration/admin role.
+    # Do not silently run with an unscoped NOBYPASSRLS runtime and clean nothing.
+    admin_url = os.environ.get('CLOUD_MIGRATION_DATABASE_URL')
+    if not admin_url or not admin_url.startswith('postgresql+psycopg://'):
+        raise SystemExit('Maintenance requires CLOUD_MIGRATION_DATABASE_URL')
+    db = CloudDatabase(admin_url)
     try:
         print('Reconciled operations:', reconcile(db, PrivateStorage(settings)))
     except Exception:

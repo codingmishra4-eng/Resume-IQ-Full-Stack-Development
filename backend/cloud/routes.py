@@ -39,11 +39,11 @@ class Download(BaseModel):
     expires_in: int = 60
 
 
-def services(request):
+def services(request, user):
     db, storage = request.app.state.cloud_db, request.app.state.private_storage
     if db is None or storage is None:
         raise APIError('cloud_unavailable', 'Cloud service unavailable.', 503)
-    return db, storage
+    return db.for_user(user.id), storage
 
 
 def public(row):
@@ -84,7 +84,7 @@ async def upload(request: Request, user: User,
 
 
 def persist_upload(request, user, data, suffix, metadata):
-    db, storage = services(request)
+    db, storage = services(request, user)
     # Commit intent FIRST: even uncertain network/commit outcomes remain discoverable.
     row = db.create(Resume, user.id, object_path=f'{user.id}/{uuid4()}{suffix}',
                     state='pending', metadata_json=metadata.model_dump())
@@ -108,13 +108,13 @@ def persist_upload(request, user, data, suffix, metadata):
 
 @router.get('/resumes', response_model=list[StoredResume])
 def list_resumes(request: Request, user: User, offset: Annotated[int, Query(ge=0)] = 0):
-    db, _ = services(request)
+    db, _ = services(request, user)
     return [public(row) for row in db.list(Resume, user.id, offset)]
 
 
 @router.get('/resumes/{id}', response_model=StoredResume)
 def get_resume(id: UUID, request: Request, user: User):
-    db, _ = services(request)
+    db, _ = services(request, user)
     with db.sessions() as session:
         return public(owned_ready(db, session, user, id))
 
@@ -122,7 +122,7 @@ def get_resume(id: UUID, request: Request, user: User):
 @router.post('/resumes/{id}/download', response_model=Download)
 def download(id: UUID, request: Request, response: Response, user: User):
     response.headers["Cache-Control"] = "no-store"
-    db, storage = services(request)
+    db, storage = services(request, user)
     with db.sessions() as session:
         row = owned_ready(db, session, user, id)
         return Download(url=storage.sign(row.object_path))
@@ -130,7 +130,7 @@ def download(id: UUID, request: Request, response: Response, user: User):
 
 @router.delete('/resumes/{id}', status_code=204)
 def delete_resume(id: UUID, request: Request, user: User):
-    db, storage = services(request)
+    db, storage = services(request, user)
     with db.sessions.begin() as session:
         row = db.owned(session, Resume, user.id, id)
         row.state = 'deleting'
@@ -153,13 +153,13 @@ def analysis_public(row):
 
 @router.get('/analyses', response_model=list[AnalysisSummary])
 def analyses(request: Request, user: User, offset: Annotated[int, Query(ge=0)] = 0):
-    db, _ = services(request)
+    db, _ = services(request, user)
     return [analysis_public(row) for row in db.list(Analysis, user.id, offset)]
 
 
 @router.get('/analyses/{id}', response_model=AnalysisSummary)
 def analysis(id: UUID, request: Request, user: User):
-    db, _ = services(request)
+    db, _ = services(request, user)
     with db.sessions() as session:
         return analysis_public(db.owned(session, Analysis, user.id, id))
 
@@ -173,6 +173,6 @@ class HistoryEntry(BaseModel):
 
 @router.get('/history', response_model=list[HistoryEntry])
 def history(request: Request, user: User, offset: Annotated[int, Query(ge=0)] = 0):
-    db, _ = services(request)
+    db, _ = services(request, user)
     return [HistoryEntry(id=row.id, created_at=row.created_at, event=row.event,
                          resource_id=row.resource_id) for row in db.list(History, user.id, offset)]

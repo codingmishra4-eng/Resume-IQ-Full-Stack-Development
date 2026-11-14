@@ -3,16 +3,16 @@ import os
 from alembic import context
 from sqlalchemy import create_engine
 from backend.cloud.models import Base
-url = os.environ['CLOUD_DATABASE_URL']
+url = os.environ['CLOUD_MIGRATION_DATABASE_URL']
 if not url.startswith('postgresql+psycopg://'):
     raise ValueError('Migrations require PostgreSQL')
 if context.is_offline_mode():
-    context.configure(url=url, target_metadata=Base.metadata, literal_binds=True)
+    context.configure(url=url, target_metadata=Base.metadata, literal_binds=True, version_table_schema='public')
     with context.begin_transaction():
         context.run_migrations()
 else:
     engine = create_engine(url, hide_parameters=True)
     with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=Base.metadata)
+        context.configure(connection=connection, target_metadata=Base.metadata, version_table_schema='public')
         with context.begin_transaction():
             context.run_migrations()
