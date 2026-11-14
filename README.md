@@ -56,10 +56,25 @@ Set `OPENAI_API_KEY=sk-...` in `.env`. AI features activate automatically;
 any API failure silently falls back to the deterministic rule engine and the
 UI labels which source produced each suggestion (`🤖 OpenAI` vs `⚙️ Rule-based`).
 
+## FastAPI migration (Phase 1)
+
+The original Streamlit application remains available. The separate FastAPI entry
+point preserves `/`, `/api/health`, and `/api/resume/upload` with typed contracts,
+restricted metadata responses, upload validation and explicit CORS configuration.
+Install the pinned API dependencies in a separate Python 3.12 environment:
+
+```bash
+python -m pip install -r requirements-api.txt
+python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000
+```
+
+See [FastAPI setup, contracts, privacy changes and limits](docs/FASTAPI_PHASE1.md).
+The API has no authentication yet and is not production ready.
+
 ## 🧪 Tests & smoke check
 
 ```bash
-python -m pytest          # 45 tests across 6 test files
+python -m pytest          # existing suite; install requirements-api.txt for API tests
 python smoke_test.py      # end-to-end pipeline check → prints "SMOKE OK"
 ```
 
