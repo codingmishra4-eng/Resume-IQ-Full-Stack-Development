@@ -1,5 +1,6 @@
 """Fail-closed optional cloud configuration."""
 import os
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -13,7 +14,7 @@ class CloudSettings:
     algorithm: str
     database_url: str = field(repr=False)
     bucket: str
-    service_key: str = field(repr=False)
+    secret_key: str = field(repr=False)
 
     def __post_init__(self):
         origin = urlsplit(self.supabase_url)
@@ -30,8 +31,8 @@ class CloudSettings:
             raise ValueError('CLOUD_DATABASE_URL must use postgresql+psycopg')
         if not self.bucket or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in self.bucket):
             raise ValueError('Invalid private bucket name')
-        if not self.service_key.strip():
-            raise ValueError('Backend storage credential required')
+        if not re.fullmatch(r'sb_secret_[A-Za-z0-9_-]+', self.secret_key):
+            raise ValueError('SUPABASE_SECRET_KEY must be a modern backend secret key')
 
     @classmethod
     def from_env(cls):
@@ -42,5 +43,5 @@ class CloudSettings:
             return None
         names = ('SUPABASE_URL', 'SUPABASE_JWT_ISSUER', 'SUPABASE_JWT_AUDIENCE',
                  'SUPABASE_JWKS_URL', 'SUPABASE_JWT_ALGORITHM', 'CLOUD_DATABASE_URL',
-                 'SUPABASE_STORAGE_BUCKET', 'SUPABASE_SERVICE_ROLE_KEY')
+                 'SUPABASE_STORAGE_BUCKET', 'SUPABASE_SECRET_KEY')
         return cls(*(os.environ[name] for name in names))

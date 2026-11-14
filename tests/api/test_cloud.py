@@ -216,10 +216,10 @@ def test_configuration_closed(monkeypatch):
     values = dict(supabase_url='https://example.supabase.co', issuer='https://example.supabase.co/auth/v1',
                   audience='authenticated', jwks_url='https://example.supabase.co/auth/v1/.well-known/jwks.json',
                   algorithm='ES256', database_url='postgresql+psycopg://test@localhost/db',
-                  bucket='resumes', service_key='fake-unit-test-key')
+                  bucket='resumes', secret_key='sb_secret_unit_test_only_not_real')
     CloudSettings(**values)
     for key, value in [('algorithm', 'HS256'), ('jwks_url', 'https://attacker.invalid'),
-                       ('database_url', 'sqlite:///local.db'), ('bucket', '../public'), ('service_key', '')]:
+                       ('database_url', 'sqlite:///local.db'), ('bucket', '../public'), ('secret_key', '')]:
         with pytest.raises(ValueError):
             CloudSettings(**(values | {key: value}))
 
@@ -340,7 +340,7 @@ def test_reconcile_only_old_unfinished_records(cloud):
 
 def test_storage_traversal_and_provider_contract():
     from unittest.mock import patch
-    settings = SimpleNamespace(bucket='resumes', supabase_url='https://example.invalid', service_key='unit-only')
+    settings = SimpleNamespace(bucket='resumes', supabase_url='https://example.invalid', secret_key='sb_secret_unit_test_only_not_real')
     storage = PrivateStorage(settings)
     with pytest.raises(ValueError):
         storage.path('../other/file.pdf')
@@ -352,4 +352,124 @@ def test_storage_traversal_and_provider_contract():
         args = client.return_value.__enter__.return_value.request.call_args
         assert args.kwargs['headers']['Content-Type'] == 'application/pdf'
         assert args.kwargs['headers']['x-upsert'] == 'false'
-        assert args.kwargs['headers']['Authorization'] == 'Bearer unit-only'
+        assert args.kwargs['headers']['apikey'] == settings.secret_key
+        assert 'authorization' not in {name.lower() for name in args.kwargs['headers']}
+
+
+@pytest.mark.parametrize('key', ['', 'sb_secret_', 'sb_publishable_unit_test',
+    'legacy.jwt.placeholder', ' sb_secret_unit_test', 'sb_secret_unit_test\n',
+    'sb_secret_unit\r\nInjected-header'],
+    ids=['missing', 'empty-secret', 'publishable', 'legacy-jwt', 'leading-space',
+         'trailing-newline', 'header-injection'])
+def test_modern_secret_configuration_rejects_invalid_keys(key):
+    values = dict(supabase_url='https://example.supabase.co', issuer='https://example.supabase.co/auth/v1',
+                  audience='authenticated', jwks_url='https://example.supabase.co/auth/v1/.well-known/jwks.json',
+                  algorithm='ES256', database_url='postgresql+psycopg://test@localhost/db',
+                  bucket='resumes', secret_key=key)
+    with pytest.raises(ValueError, match='SUPABASE_SECRET_KEY') as exc:
+        CloudSettings(**values)
+    if key:
+        assert key not in str(exc.value)
+
+
+def test_modern_secret_from_env_fail_closed(monkeypatch):
+    values = dict(CLOUD_ENABLED='true', SUPABASE_URL='https://example.supabase.co',
+                  SUPABASE_JWT_ISSUER='https://example.supabase.co/auth/v1',
+                  SUPABASE_JWT_AUDIENCE='authenticated', SUPABASE_JWKS_URL='https://example.supabase.co/auth/v1/.well-known/jwks.json',
+                  SUPABASE_JWT_ALGORITHM='ES256', CLOUD_DATABASE_URL='postgresql+psycopg://test@localhost/db',
+                  SUPABASE_STORAGE_BUCKET='resumes', SUPABASE_SERVICE_ROLE_KEY='legacy-unit-test-placeholder')
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv('SUPABASE_SECRET_KEY', raising=False)
+    with pytest.raises(KeyError, match='SUPABASE_SECRET_KEY'):
+        CloudSettings.from_env()
+    secret = 'sb_secret_unit_test_only_not_real'
+    monkeypatch.setenv('SUPABASE_SECRET_KEY', secret)
+    settings = CloudSettings.from_env()
+    assert settings.secret_key == secret and settings.algorithm == 'ES256'
+    assert secret not in repr(settings) and settings.database_url not in repr(settings)
+    monkeypatch.setenv('CLOUD_ENABLED', 'false')
+    monkeypatch.delenv('SUPABASE_SECRET_KEY')
+    assert CloudSettings.from_env() is None
+
+
+@pytest.mark.parametrize('header', ['Authorization', 'authorization', 'APIKEY', 'apikey'],
+                         ids=['bearer-title', 'bearer-lower', 'apikey-upper', 'apikey-lower'])
+def test_storage_cannot_override_auth_headers(header):
+    storage = PrivateStorage(SimpleNamespace(secret_key='sb_secret_unit_test_only_not_real'))
+    with pytest.raises(ValueError, match='Unsupported Storage request header'):
+        storage._request('GET', 'bucket/resumes', headers={header: 'untrusted'})
+
+
+@pytest.mark.parametrize('failure', [None, 'upload', 'sign', 'delete'],
+                         ids=['success', 'upload-failure', 'sign-failure', 'delete-failure'])
+def test_modern_secret_http_contract_and_privacy(cloud, pdf_bytes, monkeypatch, caplog, failure):
+    """Real HTTPX serialization with mocked provider; no live Supabase requests."""
+    import httpx
+    import logging
+    import backend.cloud.storage as storage_module
+    client, db, _, user, app = cloud
+    secret = 'sb_secret_unit_test_only_not_real'
+    settings = SimpleNamespace(bucket='resumes', supabase_url='https://example.invalid', secret_key=secret)
+    observed = []
+
+    def provider(request):
+        observed.append(request)
+        assert request.headers['apikey'] == secret
+        assert 'authorization' not in request.headers
+        assert secret not in str(request.url)
+        assert secret.encode() not in request.content
+        # Deliberately echo synthetic credential in provider errors to verify
+        # sanitization at the public boundary, without any real key involved.
+        path = request.url.path
+        operation = ('delete' if request.method == 'DELETE' else
+                     'sign' if '/object/sign/' in path else
+                     'upload' if request.method == 'POST' else 'bucket')
+        if operation == failure:
+            return httpx.Response(403, json={'message': secret})
+        if operation == 'bucket':
+            return httpx.Response(200, json={'public': False})
+        if operation == 'sign':
+            return httpx.Response(200, json={'signedURL': '/object/sign/resumes/test.pdf?token=temporary-unit-test'})
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(provider)
+    monkeypatch.setattr(storage_module, 'httpx', SimpleNamespace(
+        Client=lambda **kwargs: httpx.Client(transport=transport, **kwargs)))
+    app.state.private_storage = PrivateStorage(settings)
+    caplog.set_level(logging.DEBUG)
+    response = client.post('/api/v1/resumes', files={'file': ('a.pdf', pdf_bytes)})
+    responses = [response]
+    assert response.status_code == (503 if failure == 'upload' else 201)
+    if failure != 'upload':
+        id = response.json()['id']
+        response = client.post(f'/api/v1/resumes/{id}/download')
+        responses.append(response)
+        assert response.status_code == (500 if failure == 'sign' else 200)
+        if failure != 'sign':
+            assert response.json()['expires_in'] == 60
+            assert response.headers['cache-control'] == 'no-store'
+        response = client.delete(f'/api/v1/resumes/{id}')
+        responses.append(response)
+        assert response.status_code == (503 if failure == 'delete' else 204)
+    responses.append(client.get('/api/v1/resumes'))
+    responses.append(client.get('/api/v1/history'))
+    for response in responses:
+        assert secret not in response.text
+        assert secret not in str(dict(response.headers))
+    assert secret not in caplog.text
+    assert observed and all('authorization' not in request.headers for request in observed)
+    uploads = [request for request in observed if request.method == 'POST' and '/object/sign/' not in request.url.path]
+    assert len(uploads) == 1
+    assert uploads[0].headers['content-type'] == 'application/pdf'
+    assert uploads[0].headers['x-upsert'] == 'false'
+    assert uploads[0].content == pdf_bytes
+    if failure != 'upload':
+        import json
+        signed = next(request for request in observed if '/object/sign/' in request.url.path)
+        assert json.loads(signed.content) == {'expiresIn': 60}
+    deleted = next(request for request in observed if request.method == 'DELETE')
+    import json
+    prefixes = json.loads(deleted.content)['prefixes']
+    assert len(prefixes) == 1 and prefixes[0].startswith(str(user.id) + '/')
+    assert deleted.url.path == '/storage/v1/object/resumes'

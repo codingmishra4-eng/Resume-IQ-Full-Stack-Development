@@ -74,10 +74,11 @@ unchanged. The cloud database is never used implicitly by local business engines
    Default RLS with no granting policies denies direct client access. Do not
    disable Storage RLS. Use a dedicated bucket/project if broad existing policies
    cannot be removed safely. Do not edit Supabase-managed storage tables directly.
-4. Keep the service-role key and database URL only in backend environment/secrets.
+4. Keep the modern `sb_secret_` API key and database URL only in backend
+   environment/secrets.
    Never prefix them with `NEXT_PUBLIC_`, place them in browser code, or commit
-   `.env`. Configure JWT verification and database as below. The service-role key
-   bypasses Storage RLS: the backend's JWT and ownership checks are mandatory.
+   `.env`. Configure JWT verification and database as below. The secret key grants
+   privileged service-role access and bypasses Storage RLS: the backend's JWT and ownership checks are mandatory.
 5. Run migrations explicitly, then start the API. Test direct anonymous/user-token
    bucket access denial and real upload/sign/delete against your own project
    before public use. These live Supabase checks have not been run here.
@@ -92,9 +93,42 @@ unchanged. The cloud database is never used implicitly by local business engines
 | `SUPABASE_JWT_ALGORITHM` | Exactly `ES256` or `RS256`, matching signing key |
 | `CLOUD_DATABASE_URL` | `postgresql+psycopg://...`; use TLS with `?sslmode=verify-full` and trusted CA in production |
 | `SUPABASE_STORAGE_BUCKET` | Private bucket ID, lowercase alphanumeric, hyphen/underscore |
-| `SUPABASE_SERVICE_ROLE_KEY` | Backend-only Storage credential |
+| `SUPABASE_SECRET_KEY` | Backend-only modern `sb_secret_` Storage API key; required, never a publishable key or JWT |
 | `API_ALLOWED_ORIGINS` | Existing comma-separated exact HTTP(S) origins; no wildcard |
 | `MAX_UPLOAD_MB` | Existing positive finite upload cap (parser cap also applies) |
+
+### Modern secret key migration
+
+Replace the old `SUPABASE_SERVICE_ROLE_KEY` setting with `SUPABASE_SECRET_KEY`
+in backend secrets and restart the API. This adapter requires an opaque modern
+`sb_secret_` key; legacy service-role JWTs and `sb_publishable_` keys are rejected.
+The old variable is not read and there is no fallback. With cloud mode enabled,
+a missing or malformed secret fails startup without echoing its value. Configuration
+repr omits the key and database URL. Cloud-disabled Streamlit/local usage still
+requires no Supabase credentials. No database migration is needed for this change.
+
+Storage REST requests carry the secret only in the `apikey` header, never in
+`Authorization: Bearer`, a URL/query string, or a request body. The hosted
+Supabase API gateway handles API-key authentication before Storage; this assumes
+hosted Supabase (or a compatible gateway), not a bare self-hosted Storage server
+expecting a legacy service JWT. The gateway's privileged access bypasses Storage
+RLS, so backend user ownership checks remain essential. Operation headers cannot
+override authentication. Private bucket checks, random owner-scoped paths,
+non-upsert uploads, `DELETE /object/{bucket}` with `prefixes`, and
+`POST /object/sign/{bucket}/{path}` with `expiresIn: 60` are retained.
+
+Browser-to-FastAPI authentication is separate: users still send their Supabase
+access JWT in Authorization and the backend still verifies ES256/RS256 signatures
+against project JWKS. The server secret is never accepted as user identity or
+returned to the client. Never use `NEXT_PUBLIC_` or browser environment variables
+for this credential. Rotate secrets in backend settings, not JWT verification
+settings; do not share actual credentials when troubleshooting.
+
+References: [Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys)
+and [Storage REST reference](https://supabase.com/docs/reference/self-hosting-storage/introduction).
+Local tests use synthetic keys and mocked HTTP transports. Live modern-key
+Storage upload/sign/download/delete and key rotation still require verification
+against the configured project; no live keys are required by tests or committed.
 
 `.env.example` contains placeholders only. `config` loads `.env` with real
 environment values taking precedence. Separate Streamlit/API environments avoid
@@ -236,7 +270,7 @@ optional OpenAI snippet transmission. In cloud mode resumes **leave the user's
 device**. Cloud routes do not call AI or local logging-intensive scoring/builder
 workflows. API failures discard provider exception text; no tokens/raw resume
 contents are logged. Configure hosting/proxy/APM logs to redact Authorization,
-request/response bodies and signed URLs. Original local-app logs have their
+request/response bodies, `apikey` headers and signed URLs. Original local-app logs have their
 existing behavior and are not the cloud audit log.
 
 ## Verification and limitations
@@ -267,7 +301,7 @@ exhaustion. No deployment is performed by this change.
 
 Further limits: no malware scanner, process sandbox, account cleanup webhook,
 per-user storage quota, immediate access-token revocation, integration CI secret
-management or production observability. Storage service-role and BYPASSRLS roles
+management or production observability. Storage secret keys and BYPASSRLS roles
 are powerful credentials. Review grants, backups, encryption/TLS, project region,
 retention requirements and Supabase integration before production use. Unit tests
 and a disposable PostgreSQL test do not certify production security or browser UI.
@@ -281,3 +315,13 @@ and exercised all 15 PDF/DOCX templates. These checks include existing Phase 1
 and local business-logic tests, not a Streamlit browser interaction test. The
 PostgreSQL test includes row-lock contention as well as migrations/RLS/CRUD.
 Supabase calls remain mocked and do not count as live Supabase verification.
+
+
+### Modern API key update verification (2026-11-15)
+
+On CPython 3.12.14/Linux: `python -m pytest -ra` passed 147 tests with 0 failures,
+1 skip and 0 errors. The existing PostgreSQL integration test was skipped because
+`TEST_POSTGRES_URL` was unset; no new skip was added. `python -m pip check` reported
+no broken requirements and `python smoke_test.py` exited 0 with `SMOKE OK`.
+The modern-key HTTP contract and success/error response/log privacy tests use
+HTTPX MockTransport and synthetic credentials, not a live Supabase project.

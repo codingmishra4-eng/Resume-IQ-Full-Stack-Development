@@ -10,10 +10,14 @@ class PrivateStorage:
 
     def _request(self, method, path, **kwargs):
         extra_headers = kwargs.pop("headers", {})
+        # Only operation headers may be added. Never forward caller Authorization
+        # or allow overrides of the privileged API credential (case-insensitive).
+        if any(name.lower() not in {'content-type', 'x-upsert'} for name in extra_headers):
+            raise ValueError('Unsupported Storage request header')
         with httpx.Client(timeout=30, follow_redirects=False) as client:
             response = client.request(method, self.settings.supabase_url + '/storage/v1/' + path,
-                                      headers={'Authorization': 'Bearer ' + self.settings.service_key,
-                                               'apikey': self.settings.service_key, **extra_headers}, **kwargs)
+                                      # Modern secret keys are opaque API keys, not Bearer JWTs.
+                                      headers={'apikey': self.settings.secret_key, **extra_headers}, **kwargs)
             response.raise_for_status()
             return response
 
