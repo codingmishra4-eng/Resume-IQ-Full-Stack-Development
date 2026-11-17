@@ -51,7 +51,15 @@ def postgres():
     assert not set(TABLES) & set(inspect(db.engine).get_table_names())
     with db.engine.begin() as conn:
         conn.execute(text('REVOKE phase2_inherited FROM service_role'))
+    migrate('upgrade', '0001_cloud')
+    legacy_id, legacy_owner = uuid4(), uuid4()
+    with db.engine.begin() as conn:
+        conn.execute(text("INSERT INTO public.cloud_analyses (id,user_id,summary_json,created_at,updated_at) VALUES (:id,:owner,CAST(:payload AS jsonb),now(),now())"), {'id':legacy_id,'owner':legacy_owner,'payload':'{"ats_score":42}'})
     migrate('upgrade', 'head')
+    with db.engine.begin() as conn:
+        row=conn.execute(text('SELECT resume_id,kind,summary_json FROM public.cloud_analyses WHERE id=:id'),{'id':legacy_id}).one()
+        assert row.resume_id is None and row.kind=='analysis' and row.summary_json=={'ats_score':42}
+        conn.execute(text('DELETE FROM public.cloud_analyses WHERE id=:id'),{'id':legacy_id})
     # Operator-reviewed provisioning grants, not automatic role/user creation.
     grants = Path('docs/sql/phase2_runtime.sql').read_text()
     with db.engine.connect() as conn:
@@ -254,5 +262,82 @@ def test_api_runtime_guard_rejects_admin_and_verifier_audits_runtime(postgres, t
     try:
         verifier = Verifier(None, None, runtime.engine, tmp_path / 'unused.json')
         verifier.audit_database()
+    finally:
+        runtime.engine.dispose()
+
+
+def test_feature_owner_foreign_key_and_cascade(postgres):
+    """The database itself prevents a report linking to someone else's resume."""
+    runtime = runtime_database()
+    owner, other = uuid4(), uuid4()
+    try:
+        resume = runtime.create(Resume, owner, object_path=f'{owner}/{uuid4()}.pdf', state='ready', metadata_json={})
+        with pytest.raises(DBAPIError) as exc:
+            runtime.create(Analysis, other, resume_id=resume.id, kind='analysis', summary_json={})
+        assert exc.value.orig.sqlstate == '23503'
+        report = runtime.create(Analysis, owner, resume_id=resume.id, kind='analysis', summary_json={})
+        match = runtime.create(Analysis, owner, resume_id=resume.id, kind='match', summary_json={})
+        with runtime.for_user(other).sessions() as session:
+            assert session.scalars(text('SELECT id FROM public.cloud_analyses WHERE id=:id'), {'id':report.id}).all() == []
+        with runtime.for_user(owner).sessions.begin() as session:
+            session.delete(runtime.owned(session, Resume, owner, resume.id))
+        with runtime.for_user(owner).sessions() as session:
+            assert session.scalars(text('SELECT id FROM public.cloud_analyses WHERE id IN (:a,:b)'), {'a':report.id,'b':match.id}).all() == []
+    finally:
+        runtime.engine.dispose()
+
+
+def test_existing_summary_rows_remain_supported(postgres):
+    """A fresh head and the additive upgrade both preserve old summary payloads."""
+    runtime = runtime_database()
+    owner = uuid4()
+    try:
+        row = runtime.create(Analysis, owner, summary_json={'ats_score':42})
+        found = runtime.list(Analysis,owner)[0]
+        assert found.resume_id is None and found.kind == 'analysis'
+        assert found.summary_json == {'ats_score':42}
+        runtime.delete(Analysis,owner,row.id)
+    finally:
+        runtime.engine.dispose()
+
+
+def test_phase4_features_through_nobypass_runtime(postgres, pdf_bytes):
+    from fastapi.testclient import TestClient
+    from backend.api import create_app
+    from backend.api_v1.settings import APISettings
+    from backend.cloud.auth import current_user, Identity
+    from tests.api.test_features import Storage, DATA, JD
+    runtime = runtime_database()
+    owner, other = Identity(uuid4()), Identity(uuid4())
+    app = create_app(APISettings())
+    app.state.cloud_db, app.state.private_storage = runtime, Storage()
+    app.dependency_overrides[current_user] = lambda: owner
+    try:
+        with TestClient(app) as client:
+            uploaded=client.post('/api/v1/resumes',files={'file':('synthetic.pdf',pdf_bytes)})
+            assert uploaded.status_code==201
+            id=uploaded.json()['id']
+            result=client.post(f'/api/v1/resumes/{id}/analyses',json={})
+            assert result.status_code==201,result.text
+            report_id=result.json()['id']
+            result=client.post(f'/api/v1/resumes/{id}/matches',json={'job_description':JD})
+            assert result.status_code==201,result.text
+            match_id=result.json()['id']
+            result=client.post('/api/v1/builder/drafts',json=DATA)
+            assert result.status_code==201,result.text
+            draft_id=result.json()['id']
+            app.dependency_overrides[current_user]=lambda:other
+            assert client.get('/api/v1/analyses').json()==[]
+            assert client.get('/api/v1/builder/drafts').json()==[]
+            assert client.get('/api/v1/history').json()==[]
+            for path in [f'/analysis-reports/{report_id}',f'/job-matches/{match_id}',f'/builder/drafts/{draft_id}']:
+                assert client.get('/api/v1'+path).status_code==404
+            assert client.post(f'/api/v1/builder/drafts/{draft_id}/exports/pdf').status_code==404
+            app.dependency_overrides[current_user]=lambda:owner
+            assert client.post(f'/api/v1/builder/drafts/{draft_id}/exports/docx').status_code==200
+            assert client.delete(f'/api/v1/resumes/{id}').status_code==204
+            assert client.get(f'/api/v1/analysis-reports/{report_id}').status_code==404
+            assert client.get(f'/api/v1/job-matches/{match_id}').status_code==404
+            assert client.delete(f'/api/v1/builder/drafts/{draft_id}').status_code==204
     finally:
         runtime.engine.dispose()

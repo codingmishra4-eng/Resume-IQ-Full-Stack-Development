@@ -61,6 +61,8 @@ class CloudDatabase:
     def list(self, model, user_id, offset=0):
         with self.for_user(user_id).sessions() as session:
             query = select(model).where(model.user_id == user_id)
+            if model is Analysis:
+                query = query.where(Analysis.kind == 'analysis')
             if model is Resume:
                 query = query.where(Resume.state == 'ready')
             return list(session.scalars(query.order_by(model.created_at.desc(), model.id).offset(offset).limit(100)))

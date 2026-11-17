@@ -187,3 +187,13 @@ Python `frontend/` and Streamlit application are preserved. See
 [Next.js setup, security and integration status](docs/NEXTJS_PHASE3.md) for local
 commands and the explicit Phase 4 endpoint dependencies. Nothing is deployed
 or merged automatically; Phase 2 final live verification remains pending.
+
+## Phase 4 feature integration
+
+The Next.js workspace now connects detailed ATS reports, job matching,
+source-grounded writing suggestions, private builder drafts and server PDF/DOCX
+exports to authenticated FastAPI routes. Apply the additive migration before
+running this branch against an existing cloud database. See the
+[Phase 4 API, security, tests and operator guide](docs/PHASE4_INTEGRATION.md).
+Live Supabase/provider and browser verification remain pending; nothing is
+merged or deployed automatically.

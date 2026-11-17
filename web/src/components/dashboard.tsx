@@ -153,8 +153,8 @@ export function Dashboard() {
               icon={<ChartNoAxesCombined size={27} />}
               title="A little perspective goes a long way."
             >
-              Saved scores will appear here when available. New cloud analysis
-              is a future integration.
+              Run an analysis in the Resume workspace to save your first
+              estimated score.
             </EmptyState>
           )}
         </Panel>
@@ -188,22 +188,22 @@ export function Dashboard() {
             href: "/analyzer",
             icon: <ScanText size={21} />,
             title: "Understand your resume",
-            text: "Upload a version and review its document overview.",
+            text: "Upload a version and compute a detailed report.",
             status: "Resume workspace",
           },
           {
             href: "/job-match",
             icon: <Target size={21} />,
             title: "Focus on the right role",
-            text: "Prepare a job description for your next comparison.",
-            status: "Draft workspace",
+            text: "Compare real skills and keywords with a target role.",
+            status: "Connected workspace",
           },
           {
             href: "/improve",
             icon: <Sparkles size={21} />,
             title: "Refine your story",
-            text: "Collect the words you want to improve.",
-            status: "Draft workspace",
+            text: "Review grounded writing suggestions.",
+            status: "Connected workspace",
           },
         ].map((item) => (
           <Link href={item.href} key={item.href} className="quick-card">

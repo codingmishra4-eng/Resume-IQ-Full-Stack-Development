@@ -489,14 +489,20 @@ export function HistoryList({
           </span>
           <div>
             <strong>
-              {item.event === "resume_uploaded"
-                ? "Resume uploaded"
-                : item.event === "resume_deleted"
-                  ? "Resume deleted"
-                  : "Workspace activity"}
+              {(
+                {
+                  resume_uploaded: "Resume uploaded",
+                  resume_deleted: "Resume deleted",
+                  analysis_created: "Analysis generated",
+                  job_matched: "Job comparison saved",
+                  draft_saved: "Builder draft saved",
+                  draft_deleted: "Builder draft deleted",
+                  export_generated: "Resume export generated",
+                } as Record<string, string>
+              )[item.event] ?? "Workspace activity"}
             </strong>
             <small>
-              Document {item.resource_id.slice(0, 6)} · {date(item.created_at)}
+              Resource {item.resource_id.slice(0, 6)} · {date(item.created_at)}
             </small>
           </div>
         </li>

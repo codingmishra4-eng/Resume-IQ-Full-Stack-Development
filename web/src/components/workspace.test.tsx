@@ -6,8 +6,14 @@ import { JobMatch, Improve } from "./workflows";
 import { Builder } from "./builder";
 import { Modal } from "./ui";
 import { account, resume } from "@/test/fixtures";
+const { mockApi } = vi.hoisted(() => ({
+  mockApi: {
+    drafts: vi.fn().mockResolvedValue([]),
+    templates: vi.fn().mockResolvedValue([]),
+  },
+}));
 vi.mock("./providers", () => ({
-  useAuth: () => ({ account, api: {} }),
+  useAuth: () => ({ account, api: mockApi }),
   useWorkspace: () => ({
     resumes: { data: [resume], error: null },
     analyses: { data: [], error: null },
@@ -25,7 +31,7 @@ it("shows real document counts and no fabricated ATS score", () => {
   expect(screen.getByText("resume.pdf")).toBeInTheDocument();
   expect(screen.queryByText(/98%/)).not.toBeInTheDocument();
 });
-it("keeps job matching explicitly unavailable while accepting a local draft", async () => {
+it("requires an owned resume and valid role before comparing", async () => {
   const user = userEvent.setup();
   render(<JobMatch />);
   await user.type(
@@ -76,9 +82,7 @@ it("edits a real local builder preview and changes template presentation", async
   await user.click(screen.getByRole("button", { name: /Editorial/ }));
   expect(screen.getByRole("article")).toHaveClass("editorial");
   expect(
-    screen.getByText(
-      /Cloud saving and generated PDF\/DOCX exports are not connected/,
-    ),
+    screen.getByText(/Unsaved edits stay in this browser tab/),
   ).toBeInTheDocument();
 });
 it("provides accessible modal semantics, Escape dismissal and focus return", async () => {

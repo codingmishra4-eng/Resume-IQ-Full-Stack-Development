@@ -38,7 +38,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-        return error_response(422, "invalid_request", "A resume file is required in the multipart file field.")
+        return error_response(422, "invalid_request", "Request fields are missing or invalid.")
 
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:

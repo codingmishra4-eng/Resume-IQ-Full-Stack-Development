@@ -161,7 +161,10 @@ def analyses(request: Request, user: User, offset: Annotated[int, Query(ge=0)] =
 def analysis(id: UUID, request: Request, user: User):
     db, _ = services(request, user)
     with db.sessions() as session:
-        return analysis_public(db.owned(session, Analysis, user.id, id))
+        row = db.owned(session, Analysis, user.id, id)
+        if row.kind != 'analysis':
+            raise APIError('not_found', 'Resource not found.', 404)
+        return analysis_public(row)
 
 
 class HistoryEntry(BaseModel):
