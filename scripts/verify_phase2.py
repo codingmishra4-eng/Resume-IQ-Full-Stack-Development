@@ -180,9 +180,13 @@ class Verifier:
             self.created[user['id']] = set()
         self.save_journal()
 
-    def save_journal(self):
+    def journal_data(self):
         data = {'version': 1, 'created': {owner: sorted(ids) for owner, ids in self.created.items()}, 'hashes': sorted(self.hashes), 'baseline': {owner: sorted(ids) for owner, ids in self.baseline.items()},
                 'uncertain': {owner: sorted(ids) for owner, ids in self.uncertain.items()}, 'ambiguous_upload': self.ambiguous_upload, 'paths': self.paths}
+        return data
+
+    def save_journal(self):
+        data = self.journal_data()
         self.journal.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(prefix='.phase2-', dir=self.journal.parent)
         try:
@@ -384,7 +388,7 @@ class Verifier:
         logging.disable(logging.CRITICAL)
         try:
             data = json.loads(source.read_text(encoding='utf-8'))
-            require(data.get('version') == 1, 'Unsupported recovery journal.')
+            require(data.get('version') == 1 and 'phase5' not in data, 'Unsupported recovery journal; use its matching operator procedure.')
             self.audit_database()
             self.bucket_private()
             self.login()  # Fresh local Auth sessions; no tokens are stored in journals.
@@ -454,7 +458,7 @@ class Verifier:
         return 0 if self.failed == 0 else 1
 
 
-def main(argv=None):
+def main(argv=None, verifier_class=Verifier, request_timeout=30):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--env-file', type=Path, help='Explicit local ignored environment file; none is loaded by default.')
     parser.add_argument('--cleanup-journal', type=Path, help='Replay a retained journal after all old requests have settled.')
@@ -474,8 +478,8 @@ def main(argv=None):
         engine = create_engine(settings.database, pool_pre_ping=True, hide_parameters=True)
         journal = Path('work') / ('phase2-verification-' + uuid4().hex + '.json')
         try:
-            with httpx.Client(timeout=30, follow_redirects=False) as client:
-                verifier = Verifier(settings, client, engine, journal)
+            with httpx.Client(timeout=request_timeout, follow_redirects=False) as client:
+                verifier = verifier_class(settings, client, engine, journal)
                 return verifier.recover(args.cleanup_journal) if args.cleanup_journal else verifier.run()
         finally:
             engine.dispose()

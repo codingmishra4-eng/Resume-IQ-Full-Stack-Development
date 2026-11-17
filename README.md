@@ -197,3 +197,11 @@ running this branch against an existing cloud database. See the
 [Phase 4 API, security, tests and operator guide](docs/PHASE4_INTEGRATION.md).
 Live Supabase/provider and browser verification remain pending; nothing is
 merged or deployed automatically.
+
+## Phase 5 production preparation
+
+Deployment configuration and safe QA are prepared without deploying anything.
+See [the production runbook](docs/PRODUCTION_PHASE5.md) and
+[Windows CMD instructions](docs/WINDOWS_PHASE5.md). Render uses the FastAPI
+entry point; Vercel's project root is `web/`. Staging writes, live migrations,
+infrastructure changes and launch each require separate operator approval.

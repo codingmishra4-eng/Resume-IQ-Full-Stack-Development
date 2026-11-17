@@ -341,3 +341,45 @@ def test_phase4_features_through_nobypass_runtime(postgres, pdf_bytes):
             assert client.delete(f'/api/v1/builder/drafts/{draft_id}').status_code==204
     finally:
         runtime.engine.dispose()
+
+
+def test_phase5_verifier_feature_cleanup_on_real_rls(postgres,pdf_bytes,tmp_path,monkeypatch):
+    """Exercise opt-in verifier feature writes/cleanup on a disposable DB only."""
+    import httpx
+    from fastapi import Request
+    from fastapi.testclient import TestClient
+    from backend.api import create_app
+    from backend.api_v1.settings import APISettings
+    from backend.cloud.auth import current_user,Identity
+    from scripts.verify_phase5 import Phase5Verifier
+    from scripts.verify_phase2 import Verifier,Settings
+    from tests.api.test_features import Storage
+    runtime=runtime_database();a,b=Identity(uuid4()),Identity(uuid4())
+    app=create_app(APISettings());storage=Storage();app.state.cloud_db=runtime;app.state.private_storage=storage
+    def identity(request:Request):return a if request.headers.get('authorization')=='Bearer synthetic-A' else b
+    app.dependency_overrides[current_user]=identity
+    cfg=Settings('http://testserver','https://synthetic.example.invalid','sb_publishable_synthetic','sb_secret_synthetic','unused','resumes',('a','b'),('a','b'))
+    with TestClient(app) as client:
+        class Adapter:
+            def request(self,method,url,**kwargs):
+                if url.startswith(cfg.api):return client.request(method,url.removeprefix(cfg.api),**kwargs)
+                return httpx.Response(200,json=[])
+        verifier=Phase5Verifier(cfg,Adapter(),runtime.engine,tmp_path/'journal.json')
+        verifier.users=[{'id':str(a.id),'token':'synthetic-A'},{'id':str(b.id),'token':'synthetic-B'}]
+        monkeypatch.setenv('PHASE5_MIGRATION_AUDIT_DATABASE_URL',URL)
+        verifier.audit_database()
+        assert client.get('/api/ready').status_code==200
+        for user in verifier.users:
+            owner=user['id'];verifier.baseline[owner]=set();verifier.draft_baseline[owner]=set();verifier.drafts[owner]=set();verifier.feature_ids[owner]=set()
+            result=verifier.api('POST','/api/v1/resumes',user,files={'file':('synthetic.pdf',pdf_bytes)})
+            assert result.status_code==201
+            id=result.json()['id'];verifier.created[owner]={id}
+            verifier.paths[id]=verifier.rows(user,'cloud_resumes')[0]['object_path']
+        monkeypatch.setattr(Verifier,'lifecycle',lambda self:None)
+        verifier.lifecycle()
+        assert verifier.cleanup()
+        for user in verifier.users:
+            assert verifier.draft_rows(user)==[]
+            assert verifier.rows(user,'cloud_resumes')==[]
+            assert verifier.rows(user,'cloud_history')==[]
+        assert not verifier.journal.exists()
