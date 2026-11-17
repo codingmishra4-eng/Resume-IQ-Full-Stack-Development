@@ -479,3 +479,10 @@ isolation; row locks; schema shadowing; authenticated upload/history/delete
 through a NOBYPASSRLS connection; offline dotenv-loaded migration commands and
 separate migration URL enforcement. Windows CMD syntax is documented, but native
 Windows and live Supabase provisioning are not claimed as verified here.
+
+## Final integration verification
+
+See [PHASE2_VERIFICATION.md](PHASE2_VERIFICATION.md) for the opt-in synthetic live
+verifier, secure test-user input, recovery journals, public legacy-upload guard,
+API runtime-role checkout validation, exact Windows CMD commands and completion
+gate. Live tests remain separate from local/mocked and disposable PostgreSQL tests.

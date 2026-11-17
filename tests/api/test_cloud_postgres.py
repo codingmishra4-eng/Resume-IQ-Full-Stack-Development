@@ -93,7 +93,7 @@ def test_data_api_roles_denied_even_with_forged_identity(postgres, role):
 
 
 def runtime_database():
-    db = CloudDatabase(URL)
+    db = CloudDatabase(URL, require_runtime=True)
     @event.listens_for(db.engine, 'connect')
     def assume_nologin_test_role(dbapi_connection, record):
         # Local test impersonation; no login user/password is created.
@@ -239,3 +239,20 @@ def test_runtime_grants_reject_bypass_role(postgres):
     finally:
         with postgres.engine.begin() as conn:
             conn.execute(text('ALTER ROLE resumeiq_runtime NOBYPASSRLS'))
+
+
+def test_api_runtime_guard_rejects_admin_and_verifier_audits_runtime(postgres, tmp_path):
+    db = CloudDatabase(URL, require_runtime=True)
+    try:
+        with pytest.raises(RuntimeError, match='Restricted runtime'):
+            with db.engine.connect():
+                pass
+    finally:
+        db.engine.dispose()
+    from scripts.verify_phase2 import Verifier
+    runtime = runtime_database()
+    try:
+        verifier = Verifier(None, None, runtime.engine, tmp_path / 'unused.json')
+        verifier.audit_database()
+    finally:
+        runtime.engine.dispose()

@@ -174,3 +174,7 @@ JWTs, scope every database operation to the verified UUID, and store resumes in 
 private bucket. Cloud mode is disabled by default and never migrates local SQLite.
 See [docs/FASTAPI_PHASE2.md](docs/FASTAPI_PHASE2.md) for setup, API examples,
 Alembic migrations, test commands, operational cleanup and limitations.
+
+For the final synthetic two-user integration check, safe cleanup and public API
+security settings, see [Phase 2 verification](docs/PHASE2_VERIFICATION.md).
+Live verification is opt-in and must use dedicated test accounts.

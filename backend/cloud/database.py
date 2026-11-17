@@ -22,12 +22,23 @@ def set_transaction_identity(session, transaction, connection):
 
 
 class CloudDatabase:
-    def __init__(self, url):
+    def __init__(self, url, require_runtime=False):
         # Always qualify ORM tables on PostgreSQL; a temp/search_path relation
         # cannot shadow cloud tables. SQLite unit/local behavior stays unchanged.
         options = {'schema_translate_map': {None: 'public'}} if url.startswith('postgresql') else {}
         self.engine = create_engine(url, pool_pre_ping=True, hide_parameters=True,
                                     execution_options=options)
+        if require_runtime:
+            @event.listens_for(self.engine, 'checkout')
+            def require_restricted_runtime(dbapi_connection, record, proxy):
+                try:
+                    with dbapi_connection.cursor() as cursor:
+                        cursor.execute("SELECT current_user, rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication FROM pg_roles WHERE rolname=current_user")
+                        role, privileged = cursor.fetchone()
+                    if role != 'resumeiq_runtime' or privileged:
+                        raise RuntimeError('Restricted runtime database connection required.')
+                finally:
+                    dbapi_connection.rollback()  # Catalog check must not leave an open transaction.
         self.sessions = sessionmaker(self.engine, class_=CloudSession, expire_on_commit=False)
 
     def for_user(self, user_id):
