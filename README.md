@@ -178,3 +178,12 @@ Alembic migrations, test commands, operational cleanup and limitations.
 For the final synthetic two-user integration check, safe cleanup and public API
 security settings, see [Phase 2 verification](docs/PHASE2_VERIFICATION.md).
 Live verification is opt-in and must use dedicated test accounts.
+
+## Phase 3 web application
+
+A separate Next.js App Router frontend lives in [`web/`](web/). It uses real
+Supabase authentication and the Phase 2 FastAPI document/history APIs. The original
+Python `frontend/` and Streamlit application are preserved. See
+[Next.js setup, security and integration status](docs/NEXTJS_PHASE3.md) for local
+commands and the explicit Phase 4 endpoint dependencies. Nothing is deployed
+or merged automatically; Phase 2 final live verification remains pending.
