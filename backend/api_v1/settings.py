@@ -12,8 +12,12 @@ import config
 class APISettings:
     allowed_origins: tuple[str, ...] = ()
     max_upload_bytes: int = int(config.MAX_UPLOAD_BYTES)
+    public_mode: bool = False
+    legacy_upload_enabled: bool = True
 
     def __post_init__(self) -> None:
+        if self.public_mode and self.legacy_upload_enabled:
+            raise ValueError('Public mode requires API_LEGACY_UPLOAD_ENABLED=false.')
         if self.max_upload_bytes <= 0:
             raise ValueError("MAX_UPLOAD_MB must be a positive finite size.")
         for origin in self.allowed_origins:
@@ -42,4 +46,11 @@ class APISettings:
             value.strip() for value in os.getenv("API_ALLOWED_ORIGINS", "").split(",")
             if value.strip()
         ))
-        return cls(allowed_origins=origins, max_upload_bytes=int(size_mb * 1024 * 1024))
+        def flag(name, default):
+            value = os.getenv(name, default)
+            if value not in {'true', 'false'}:
+                raise ValueError(f'{name} must be true or false.')
+            return value == 'true'
+        return cls(allowed_origins=origins, max_upload_bytes=int(size_mb * 1024 * 1024),
+                   public_mode=flag('API_PUBLIC_MODE', 'false'),
+                   legacy_upload_enabled=flag('API_LEGACY_UPLOAD_ENABLED', 'true'))

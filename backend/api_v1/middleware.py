@@ -1,6 +1,7 @@
 """Bound upload bodies before Starlette parses/spools multipart files."""
 
 from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette._utils import get_route_path
 
 from backend.api_v1.errors import error_response
 
@@ -41,3 +42,16 @@ class UploadBodyLimitMiddleware:
             return await receive()
 
         await self.app(scope, replay, send)
+
+
+class LegacyUploadGuard:
+    """Block the legacy path before buffering/parsing when explicitly disabled."""
+    def __init__(self, app: ASGIApp, enabled: bool):
+        self.app, self.enabled = app, enabled
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (not self.enabled and scope['type'] == 'http'
+                and get_route_path(scope).rstrip('/') == '/api/resume/upload'):
+            await error_response(404, 'not_found', 'Not found.')(scope, receive, send)
+            return
+        await self.app(scope, receive, send)

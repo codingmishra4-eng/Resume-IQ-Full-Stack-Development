@@ -1,11 +1,14 @@
-# Resolved on CPython 3.12/Linux from requirements-api.in in a clean venv.
-# Includes runtime and tests; optional Streamlit/AI/NLP packages are separate.
+# Resolved in an isolated CPython 3.12 environment from requirements-api.in.
+# Optional Streamlit/AI/NLP dependencies remain separate.
+alembic==1.16.5
 annotated-doc==0.0.6
 annotated-types==0.8.0
 anyio==4.16.0
 certifi==2026.10.23
+cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.1
+cryptography==50.0.2
 fastapi==0.141.1
 greenlet==3.5.6
 h11==0.16.0
@@ -14,12 +17,18 @@ httpx==0.28.1
 idna==3.20
 iniconfig==2.3.1
 lxml==6.1.3
+Mako==1.4.3
+MarkupSafe==3.0.4
 packaging==26.3
 pillow==13.0.0
 pluggy==1.7.0
+psycopg==3.2.9
+psycopg-binary==3.2.9
+pycparser==3.12
 pydantic==2.13.4
 pydantic_core==2.46.4
 Pygments==2.21.0
+PyJWT==2.10.1
 PyMuPDF==1.26.6
 pytest==8.4.2
 python-docx==1.2.0
