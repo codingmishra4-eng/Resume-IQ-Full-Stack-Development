@@ -13,6 +13,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# Collection-time isolation must precede every application import. An autouse
+# fixture alone is too late: config.py loads dotenv while modules are collected.
+from scripts.test_environment import install              # noqa: E402
+install()
+
 from database.database import Database                    # noqa: E402
 from resume_builder.builder import ResumeBuilder          # noqa: E402
 
@@ -62,3 +67,19 @@ def sample_resume_bytes(tmp_path) -> bytes:
 @pytest.fixture()
 def builder(tmp_path) -> ResumeBuilder:
     return ResumeBuilder(out_dir=tmp_path / "gen")
+
+
+@pytest.fixture(autouse=True)
+def no_unit_test_network(monkeypatch):
+    """Block real HTTP transports, preserving mocks and Windows loop self-pipes."""
+    import httpx
+    import urllib.request
+    def blocked(*args, **kwargs):
+        raise RuntimeError('Network access blocked by unit test isolation.')
+    async def async_blocked(*args, **kwargs):
+        raise RuntimeError('Network access blocked by unit test isolation.')
+    # Do not patch socket.connect: Windows asyncio uses loopback socket pairs
+    # internally. TestClient/ASGITransport and MockTransport do no network I/O.
+    monkeypatch.setattr(httpx.HTTPTransport, 'handle_request', blocked)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, 'handle_async_request', async_blocked)
+    monkeypatch.setattr(urllib.request, 'urlopen', blocked)

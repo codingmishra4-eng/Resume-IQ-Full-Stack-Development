@@ -119,3 +119,71 @@ python -m scripts.verify_phase5 --env-file .env --allow-live-writes
 The private verifier environment also needs the separate
 `PHASE5_MIGRATION_AUDIT_DATABASE_URL` for a READ ONLY version check. Read cleanup
 journal instructions first. No migration runs automatically.
+
+
+## Automatic pytest isolation (Phase 5 PR #5 fix)
+
+Use the existing API environment; no manual clearing of cloud variables and no
+shell-wide `PYTHON_DOTENV_DISABLED` setting is required:
+
+```bat
+cd C:\path\to\Resume-IQ-Full-Stack-Development
+.venv-api\Scripts\activate
+python -m pytest -o addopts="" -q --tb=short
+```
+
+Expected without an explicitly opted-in disposable database: **227 passed,
+0 failed, 17 skipped, 0 errors**. The 17 skips are PostgreSQL migration/RLS tests,
+not suppressed unit failures. Root `.env` may remain in place unchanged.
+
+For one command that runs pytest, dependency checks and the existing synthetic
+smoke test with private dotenv/cloud/provider configuration excluded:
+
+```bat
+python -m scripts.verify_local
+```
+
+This reports PASS/FAIL counts and PENDING for disposable PostgreSQL and live/
+platform verification. It does not provision a database, migrate live services,
+modify `.env`, or use real API credentials. Failed subprocess output is suppressed
+to prevent accidental credential diagnostics; rerun isolated pytest for details.
+Temporary test reports are removed. A nonzero exit indicates a required check failed.
+
+Isolation happens at the top of `tests/conftest.py`, before application imports.
+Only the pytest process and its children are affected: inherited cloud, migration,
+provider and libpq settings are stripped, dotenv auto-loading is disabled, and
+safe cloud-off defaults are installed. Real HTTP transports/urllib are blocked
+while MockTransport/ASGI remain usable. Database checkouts permit SQLite and only
+the explicitly acknowledged disposable URL. The HTTP guard deliberately leaves
+Windows asyncio's loopback self-pipe/socket-pair implementation intact.
+
+The offline migration test alone removes the dotenv-disable variable in its child
+environment, then explicitly loads a temporary synthetic file and emits `--sql`.
+That exception neither loads the developer `.env` nor connects to PostgreSQL.
+Production configuration loading and all production security guards are unchanged.
+
+### Explicit disposable PostgreSQL only
+
+Create a **brand-new local disposable** cluster first, never an existing database.
+Both settings below are required in CMD. No URL is read from `.env`; remote
+hosts, query-based host overrides and missing acknowledgement are rejected before
+any test connection. The acknowledgement is not proof of disposability: confirm
+the named container is fresh and contains no valuable data.
+
+```bat
+docker run --detach --rm --name resumeiq-isolation-test -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=resumeiq_test -p 127.0.0.1:55450:5432 postgres:17-alpine
+docker exec resumeiq-isolation-test pg_isready -U postgres
+set "RESUMEIQ_TEST_POSTGRES_DISPOSABLE=true"
+set "TEST_POSTGRES_URL=postgresql+psycopg://postgres@127.0.0.1:55450/resumeiq_test"
+python -m pytest -o addopts="" -q --tb=short
+docker stop resumeiq-isolation-test
+set "TEST_POSTGRES_URL="
+set "RESUMEIQ_TEST_POSTGRES_DISPOSABLE="
+```
+
+Wait until pg_isready succeeds. Use a fresh container on every run because tests
+create/drop roles, tables and grants. Expected full result: **244 passed,
+0 failed, 0 skipped, 0 errors**. No live Supabase database was used to obtain these
+counts. Windows execution remains pending unless the Windows CI/local run completes;
+Linux success is not a Windows pass. A Windows CI job now runs standard pytest
+with synthetic inherited migration settings.

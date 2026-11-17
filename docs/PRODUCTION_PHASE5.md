@@ -307,3 +307,27 @@ real PostgreSQL feature write/cleanup behavior. Existing Phase 1–4 tests remai
 No hosted Auth, private Storage policy, live user isolation, live migration,
 provider integration, load/soak, Render/Vercel platform shutdown or Windows
 execution is claimed. These and the launch checklist remain owner release gates.
+
+### Windows test-environment isolation follow-up
+
+Normal pytest now isolates inherited application/provider/libpq settings and
+implicit dotenv loading before application imports. The offline migration test
+explicitly enables dotenv only for its temporary synthetic-file subprocess and
+still emits SQL without a database connection. Production loaders, guards, RLS
+and authentication are unchanged. See [the Windows verification commands](WINDOWS_PHASE5.md#automatic-pytest-isolation-phase-5-pr-5-fix).
+
+Regression results on Linux/Python 3.12: **227 passed, 0 failed, 17 skipped, 0
+errors** both in an isolated checkout without `.env` and in a separate checkout
+with a complete synthetic `.env` plus inherited cloud/migration credentials.
+The synthetic file's contents were verified unchanged. A fresh local disposable
+PostgreSQL 17 run passed **244 tests, 0 failed, 0 skipped, 0 errors**. The isolated
+one-command runner also passed pip check and the existing synthetic smoke test.
+No private developer env file was opened, modified or copied for these scenarios.
+No live service was accessed. Native Windows remains pending; a Windows CI job
+now executes standard pytest with synthetic inherited migration settings.
+
+Disposable tests now require both an explicit loopback `TEST_POSTGRES_URL` and
+`RESUMEIQ_TEST_POSTGRES_DISPOSABLE=true`. Query-based host overrides and remote
+URLs are rejected before connecting; do not acknowledge a persistent local DB.
+The existing Linux CI supplies the acknowledgement only for its fresh service
+container. Without explicit opt-in, the usual 17 PostgreSQL skips are expected.

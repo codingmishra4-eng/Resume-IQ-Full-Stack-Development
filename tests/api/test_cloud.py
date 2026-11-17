@@ -497,6 +497,9 @@ def test_documented_dotenv_migration_command_offline(tmp_path):
     env_file.write_text('CLOUD_ENABLED=false\nCLOUD_MIGRATION_DATABASE_URL=postgresql+psycopg://synthetic@localhost/test_only\n')
     env = os.environ.copy()
     env.pop('CLOUD_MIGRATION_DATABASE_URL', None)
+    # This subprocess loads ONLY the explicit synthetic file and emits offline
+    # SQL. Re-enable dotenv here, never in the application/unit-test process.
+    env.pop('PYTHON_DOTENV_DISABLED', None)
     result = subprocess.run([os.sys.executable, '-c',
         "from dotenv import load_dotenv; from alembic.config import main; "
         f"load_dotenv({str(env_file)!r}, override=False); main(argv=['upgrade','head','--sql'])"],

@@ -197,6 +197,7 @@ docker run --detach --rm --name resumeiq-phase4-test-pg \
   -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=resumeiq \
   -p 127.0.0.1:55444:5432 postgres:17-alpine
 # Wait until: docker exec resumeiq-phase4-test-pg pg_isready -U postgres
+RESUMEIQ_TEST_POSTGRES_DISPOSABLE=true \
 TEST_POSTGRES_URL=postgresql+psycopg://postgres@127.0.0.1:55444/resumeiq \
   python -m pytest -o addopts='' -q --tb=short
 docker stop resumeiq-phase4-test-pg
