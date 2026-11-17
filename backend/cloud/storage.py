@@ -50,3 +50,18 @@ class PrivateStorage:
         if not path.startswith('/object/sign/') or path.startswith('//'):
             raise ValueError('Unexpected signed URL')
         return self.settings.supabase_url + '/storage/v1' + path
+
+
+    def read(self, object_path, max_bytes):
+        """Bound bytes while streaming, including missing/forged Content-Length."""
+        self.check_private()
+        url = self.settings.supabase_url + '/storage/v1/object/authenticated/' + self.path(object_path)
+        with httpx.Client(timeout=30, follow_redirects=False) as client:
+            with client.stream('GET', url, headers={'apikey': self.settings.secret_key}) as response:
+                response.raise_for_status()
+                data = bytearray()
+                for chunk in response.iter_bytes(64 * 1024):
+                    if len(data) + len(chunk) > max_bytes:
+                        raise ValueError('Stored document exceeds size limit')
+                    data.extend(chunk)
+                return bytes(data)

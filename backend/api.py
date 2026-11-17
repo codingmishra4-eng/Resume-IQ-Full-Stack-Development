@@ -1,6 +1,8 @@
 """Compatibility entry point: uvicorn backend.api:app."""
 
+import os
 from fastapi import FastAPI
+from backend.cloud.features import router as feature_router
 from backend.cloud.settings import CloudSettings
 from backend.cloud.auth import TokenVerifier
 from backend.cloud.database import CloudDatabase
@@ -22,12 +24,17 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         version="2.0.0",
     )
     application.state.api_settings = settings
+    ai_enabled = os.getenv('CLOUD_AI_ENABLED', 'false')
+    if ai_enabled not in {'true','false'}:
+        raise ValueError('CLOUD_AI_ENABLED must be true or false')
+    application.state.cloud_ai_enabled = ai_enabled == 'true'
     cloud = CloudSettings.from_env()
     application.state.token_verifier = TokenVerifier(cloud) if cloud else None
     application.state.cloud_db = CloudDatabase(cloud.database_url, require_runtime=True) if cloud else None
     application.state.private_storage = PrivateStorage(cloud) if cloud else None
     register_error_handlers(application)
     application.include_router(cloud_router)
+    application.include_router(feature_router)
     application.add_api_route('/api/me', me, response_model=Profile, methods=['GET'])
     application.include_router(router)
     application.add_middleware(
@@ -39,7 +46,7 @@ def create_app(settings: APISettings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Content-Type", "Authorization"],
     )
     return application

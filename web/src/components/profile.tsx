@@ -169,9 +169,10 @@ export function Upgrade() {
         <hr />
         <h3>What comes next</h3>
         <p className="muted">
-          Detailed cloud analysis, role comparisons, writing assistance and
-          generated resume exports are future integrations. No paid plan or
-          unavailable capability is being sold here.
+          Detailed analysis, role comparisons, source-grounded writing
+          assistance and private PDF/DOCX exports are available in your
+          workspace. AI provider use requires consent and server opt-in. Billing
+          remains unavailable.
         </p>
         <span className="muted text-sm">
           No checkout, subscriptions or payment collection.

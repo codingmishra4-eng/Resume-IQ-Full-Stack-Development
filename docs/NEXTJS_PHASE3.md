@@ -1,5 +1,8 @@
 # Phase 3 — Next.js frontend
 
+This records the Phase 3 checkpoint. For the connected analysis, matching, writing
+and builder features on the Phase 4 branch, see [Phase 4 integration](PHASE4_INTEGRATION.md).
+
 The `web/` application is built on Phase 2 commit `fea7d61`. It leaves the Python
 `frontend/`, Streamlit app, FastAPI contracts, migrations and database code intact.
 It is a real authenticated client for the available cloud endpoints, not a static

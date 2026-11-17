@@ -12,20 +12,23 @@ class UploadBodyLimitMiddleware:
         self.max_bytes = max_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["method"] != "POST":
+        if scope["type"] != "http" or scope["method"] not in {"POST", "PUT", "PATCH"}:
             await self.app(scope, receive, send)
             return
 
         # Count actual bytes, including requests without Content-Length. The
         # bounded buffer also keeps multipart spooling from accepting huge files.
+        headers = dict(scope.get('headers', []))
+        is_json = headers.get(b'content-type', b'').split(b';', 1)[0].strip().lower() == b'application/json'
+        limit = 128 * 1024 if is_json else self.max_bytes
         body = bytearray()
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
                 return
             chunk = message.get("body", b"")
-            if len(body) + len(chunk) > self.max_bytes:
-                response = error_response(400, "file_too_large", "Upload exceeds the configured size limit.")
+            if len(body) + len(chunk) > limit:
+                response = error_response(413, 'request_too_large', 'Request exceeds the size limit.') if is_json else error_response(400, 'file_too_large', 'Upload exceeds the configured size limit.')
                 await response(scope, receive, send)
                 return
             body.extend(chunk)

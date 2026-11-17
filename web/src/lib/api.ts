@@ -1,4 +1,15 @@
 import { z } from "zod";
+import {
+  analysisRecordSchema,
+  linkedAnalysisSchema,
+  matchRecordSchema,
+  improvementsSchema,
+  draftInputSchema,
+  draftRecordSchema,
+  draftSummarySchema,
+  templateSchema,
+  type DraftInput,
+} from "./features";
 import type { PublicConfig } from "./config";
 const timestamp = z
   .string()
@@ -58,6 +69,12 @@ const messages: Record<string, string> = {
   empty_file: "This file is empty.",
   file_too_large: "This file exceeds the upload size limit.",
   invalid_file: "This document could not be read. Choose a valid PDF or DOCX.",
+  busy: "A processing request is active. Please wait and try again.",
+  ungrounded_input:
+    "Copy text exactly from the selected resume before requesting improvements.",
+  analysis_limit: "This document exceeds the analysis processing limit.",
+  invalid_request: "Review the request fields and try again.",
+  request_too_large: "This request exceeds the size limit.",
   unsafe_document: "This document could not be accepted safely.",
   not_found: "This document is unavailable or you do not have access.",
   cloud_unavailable:
@@ -136,6 +153,9 @@ export class ApiClient {
     schema: z.ZodType<T> | null,
     method = "GET",
     signal?: AbortSignal,
+    payload?: unknown,
+    binary?: "pdf" | "docx",
+    timeoutMs = 30000,
   ): Promise<T> {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (signal?.aborted)
@@ -150,17 +170,37 @@ export class ApiClient {
       const timer = setTimeout(() => {
         timedOut = true;
         controller.abort();
-      }, 30000);
+      }, timeoutMs);
       try {
         const response = await this.transport.fetch(this.config.apiUrl + path, {
           method,
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(payload !== undefined
+              ? { "Content-Type": "application/json" }
+              : {}),
+          },
+          body: payload !== undefined ? JSON.stringify(payload) : undefined,
           cache: "no-store",
           credentials: "omit",
           redirect: "error",
           signal: controller.signal,
         });
         if (response.status === 401 && attempt === 0) continue;
+        if (binary && response.ok) {
+          const mime =
+            binary === "pdf"
+              ? "application/pdf"
+              : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+          const blob = await response.blob();
+          if (timedOut || blob.type !== mime || blob.size > 5 * 1024 * 1024)
+            throw new ApiError(
+              502,
+              "invalid_export",
+              "Export could not be verified.",
+            );
+          return blob as T;
+        }
         let body: unknown = null;
         if (response.status !== 204) {
           try {
@@ -204,6 +244,116 @@ export class ApiClient {
       }
     }
     throw responseError(401);
+  }
+  createAnalysis(id: string, jobDescription?: string) {
+    return this.request(
+      `/api/v1/resumes/${z.uuid().parse(id)}/analyses`,
+      analysisRecordSchema,
+      "POST",
+      undefined,
+      { job_description: jobDescription?.trim() || null },
+      undefined,
+      90000,
+    );
+  }
+  resumeAnalyses(id: string, signal?: AbortSignal) {
+    return this.list(
+      `/api/v1/resumes/${z.uuid().parse(id)}/analyses`,
+      linkedAnalysisSchema,
+      signal,
+    );
+  }
+  report(id: string, signal?: AbortSignal) {
+    return this.request(
+      `/api/v1/analysis-reports/${z.uuid().parse(id)}`,
+      analysisRecordSchema,
+      "GET",
+      signal,
+    );
+  }
+  match(id: string, jobDescription: string) {
+    return this.request(
+      `/api/v1/resumes/${z.uuid().parse(id)}/matches`,
+      matchRecordSchema,
+      "POST",
+      undefined,
+      { job_description: jobDescription },
+      undefined,
+      90000,
+    );
+  }
+  savedMatch(id: string, signal?: AbortSignal) {
+    return this.request(
+      `/api/v1/job-matches/${z.uuid().parse(id)}`,
+      matchRecordSchema,
+      "GET",
+      signal,
+    );
+  }
+  improve(
+    id: string,
+    payload: {
+      kind: "summary" | "bullets" | "verbs" | "keywords";
+      text: string;
+      job_description?: string;
+      use_ai: boolean;
+    },
+  ) {
+    return this.request(
+      `/api/v1/resumes/${z.uuid().parse(id)}/improvements`,
+      improvementsSchema,
+      "POST",
+      undefined,
+      payload,
+      undefined,
+      90000,
+    );
+  }
+  templates(signal?: AbortSignal) {
+    return this.request(
+      "/api/v1/builder/templates",
+      z.array(templateSchema),
+      "GET",
+      signal,
+    );
+  }
+  drafts(signal?: AbortSignal) {
+    return this.list("/api/v1/builder/drafts", draftSummarySchema, signal);
+  }
+  draft(id: string, signal?: AbortSignal) {
+    return this.request(
+      `/api/v1/builder/drafts/${z.uuid().parse(id)}`,
+      draftRecordSchema,
+      "GET",
+      signal,
+    );
+  }
+  saveDraft(payload: DraftInput, id?: string) {
+    return this.request(
+      "/api/v1/builder/drafts" + (id ? `/${z.uuid().parse(id)}` : ""),
+      draftRecordSchema,
+      id ? "PUT" : "POST",
+      undefined,
+      draftInputSchema.parse(payload),
+    );
+  }
+  deleteDraft(id: string) {
+    return this.request<void>(
+      `/api/v1/builder/drafts/${z.uuid().parse(id)}`,
+      null,
+      "DELETE",
+    );
+  }
+  exportDraft(id: string, format: "pdf" | "docx") {
+    return this.request<Blob>(
+      `/api/v1/builder/drafts/${z.uuid().parse(id)}/exports/${format}`,
+      null,
+      "POST",
+      undefined,
+      undefined,
+      format,
+      90000,
+    );
   }
   me(signal?: AbortSignal) {
     return this.request("/api/me", meSchema, "GET", signal);

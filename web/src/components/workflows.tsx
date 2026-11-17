@@ -1,81 +1,111 @@
 "use client";
 import { useState } from "react";
-import {
-  ArrowRight,
-  Check,
-  Clipboard,
-  ListChecks,
-  Sparkles,
-  Target,
-} from "lucide-react";
-import { useWorkspace } from "./providers";
+import { Clipboard, Sparkles } from "lucide-react";
+import { useAuth, useWorkspace } from "./providers";
 import {
   Badge,
   Button,
-  IntegrationNotice,
   Notice,
   PageHeading,
   Panel,
   TextLink,
   useToast,
 } from "./ui";
+import { MatchView } from "./match-result";
+import type { Improvements, MatchRecord } from "@/lib/features";
 import { date } from "@/lib/format";
-export function JobMatch() {
+function ResumePicker({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
   const { resumes } = useWorkspace();
-  const [selected, setSelected] = useState("");
-  const [description, setDescription] = useState("");
+  return (
+    <div className="field">
+      <label htmlFor="workflow-resume">Choose your resume</label>
+      <select
+        id="workflow-resume"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">Select a stored resume</option>
+        {resumes.data?.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.metadata.file_name} · {date(item.created_at)} ·{" "}
+            {item.id.slice(0, 6)}
+          </option>
+        ))}
+      </select>
+      {resumes.error && <Notice error>{resumes.error}</Notice>}
+      {resumes.data?.length === 0 && (
+        <TextLink href="/analyzer">Upload a resume first</TextLink>
+      )}
+    </div>
+  );
+}
+export function JobMatch() {
+  const { api } = useAuth();
+  const { refresh } = useWorkspace();
+  const [selected, setSelected] = useState(""),
+    [description, setDescription] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const [record, setRecord] = useState<MatchRecord | null>(null);
   const toast = useToast();
+  async function compare() {
+    setBusy(true);
+    setError("");
+    setRecord(null);
+    try {
+      setRecord(await api.match(selected, description));
+      await refresh();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Comparison could not be completed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <>
       <PageHeading
         eyebrow="ROLE ALIGNMENT"
         title="Find the connection."
-        description="Bring your resume and target role into the same conversation."
+        description="Compare your actual resume with the skills and keywords in a target role."
       />
       <div className="workflow-grid">
         <Panel>
-          <div className="section-heading">
-            <div>
-              <h2>Your target role</h2>
-              <p>Prepare the context for a focused comparison.</p>
-            </div>
-            <span className="feature-icon small">
-              <Target size={20} />
-            </span>
-          </div>
+          <h2>Your target role</h2>
+          <ResumePicker
+            value={selected}
+            disabled={busy}
+            onChange={(value) => {
+              setSelected(value);
+              setRecord(null);
+            }}
+          />
           <div className="field">
-            <label htmlFor="match-resume">Choose your resume</label>
-            <select
-              id="match-resume"
-              value={selected}
-              onChange={(event) => setSelected(event.target.value)}
-            >
-              <option value="">Select a stored resume</option>
-              {resumes.data?.map((item) => (
-                <option value={item.id} key={item.id}>
-                  {item.metadata.file_name} · {date(item.created_at)} ·{" "}
-                  {item.id.slice(0, 6)}
-                </option>
-              ))}
-            </select>
-            {resumes.error && <Notice error>{resumes.error}</Notice>}
-            {resumes.data?.length === 0 && (
-              <TextLink href="/analyzer">Upload a resume first</TextLink>
-            )}
-          </div>
-          <div className="field">
-            <div className="label-row">
-              <label htmlFor="job-description">Job description</label>
-              <span>{description.length.toLocaleString()} characters</span>
-            </div>
+            <label htmlFor="job-description">Job description</label>
             <textarea
               id="job-description"
               rows={12}
-              maxLength={30000}
-              placeholder="Paste the role description, responsibilities and required skills…"
+              maxLength={20000}
+              disabled={busy}
               value={description}
-              onChange={(event) => setDescription(event.target.value)}
+              onChange={(event) => {
+                setDescription(event.target.value);
+                setRecord(null);
+              }}
             />
+            <small>
+              30–20,000 characters. The raw description is not saved.
+            </small>
           </div>
           <div className="editor-actions">
             <Button
@@ -85,163 +115,260 @@ export function JobMatch() {
                 void navigator.clipboard
                   .writeText(description)
                   .then(() => toast("Job description copied."))
-                  .catch(() =>
-                    toast("Copy is unavailable in this browser.", true),
-                  );
+                  .catch(() => toast("Copy is unavailable.", true));
               }}
             >
               <Clipboard size={16} /> Copy draft
             </Button>
-            <Button disabled>
-              Compare resumes <ArrowRight size={16} />
+            <Button
+              disabled={busy || !selected || description.trim().length < 30}
+              onClick={() => void compare()}
+            >
+              {busy ? "Comparing…" : "Compare resumes"}
             </Button>
           </div>
+          {busy && (
+            <p role="status">
+              Reading your stored document and calculating alignment…
+            </p>
+          )}
+          {error && <Notice error>{error}</Notice>}
         </Panel>
-        <div className="workflow-right">
-          <Panel className="result-placeholder">
-            <div className="section-heading">
-              <h2>Match overview</h2>
-              <Badge tone="violet">Not generated</Badge>
-            </div>
-            <div className="empty-match">
-              <Target size={38} strokeWidth={1} />
-              <h3>A meaningful match needs real evidence.</h3>
-              <p>
-                We’ll compare the actual skills in your resume with the role. No
-                percentage or skill-gap result has been generated.
+        <Panel>
+          <div className="section-heading">
+            <h2>Match overview</h2>
+            <Badge>
+              {record ? "Computed from your document" : "Not generated"}
+            </Badge>
+          </div>
+          {record ? (
+            <>
+              <MatchView result={record.result} />
+              <p className="muted">
+                Saved {date(record.created_at)} · {record.id.slice(0, 8)}
               </p>
-            </div>
-            <div className="result-slot">
-              <Check size={16} />
-              <span>Matching skills</span>
-              <span>Awaiting comparison</span>
-            </div>
-            <div className="result-slot">
-              <ListChecks size={16} />
-              <span>Missing skills</span>
-              <span>Awaiting comparison</span>
-            </div>
-          </Panel>
-          <IntegrationNotice title="Cloud matching is the next connection.">
-            Resume selection and this job-description draft are ready. The
-            comparison engine is available in the local app, but its cloud
-            integration has not been added.
-          </IntegrationNotice>
-        </div>
+            </>
+          ) : (
+            <p>
+              Select your resume and submit a role description to calculate a
+              real comparison.
+            </p>
+          )}
+        </Panel>
       </div>
     </>
   );
 }
+const modes = ["summary", "bullets", "verbs", "keywords"] as const;
+type Mode = (typeof modes)[number];
+const labels = {
+  summary: "Professional summary",
+  bullets: "Experience bullets",
+  verbs: "Action verbs",
+  keywords: "Keyword guidance",
+};
 export function Improve() {
-  const [mode, setMode] = useState<"summary" | "bullets">("summary");
-  const [drafts, setDrafts] = useState({ summary: "", bullets: "" });
+  const { api } = useAuth();
   const toast = useToast();
+  const [selected, setSelected] = useState(""),
+    [mode, setMode] = useState<Mode>("summary");
+  const [drafts, setDrafts] = useState<Record<Mode, string>>({
+    summary: "",
+    bullets: "",
+    verbs: "",
+    keywords: "",
+  });
+  const [jd, setJD] = useState(""),
+    [consent, setConsent] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const [result, setResult] = useState<Improvements | null>(null),
+    [edits, setEdits] = useState<string[]>([]);
   const draft = drafts[mode];
+  async function improve() {
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const value = await api.improve(selected, {
+        kind: mode,
+        text: draft,
+        job_description: jd.trim() || undefined,
+        use_ai: consent,
+      });
+      setResult(value);
+      setEdits(value.items.map((item) => item.improved));
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Writing assistance unavailable.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  function copy(text: string) {
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => toast("Text copied. Review before using."))
+      .catch(() => toast("Copy is unavailable.", true));
+  }
   return (
     <>
       <PageHeading
         eyebrow="WORDS WITH PURPOSE"
         title="Make your work speak clearly."
-        description="Prepare the experience you want to articulate. Keep every claim grounded in what you actually did."
+        description="Review source-grounded suggestions. No suggestion overwrites your original document."
       />
       <div className="pill-tabs mb-6" aria-label="Writing mode">
-        <Button
-          variant="ghost"
-          aria-pressed={mode === "summary"}
-          onClick={() => setMode("summary")}
-        >
-          Professional summary
-        </Button>
-        <Button
-          variant="ghost"
-          aria-pressed={mode === "bullets"}
-          onClick={() => setMode("bullets")}
-        >
-          Experience bullets
-        </Button>
+        {modes.map((value) => (
+          <Button
+            key={value}
+            variant="ghost"
+            disabled={busy}
+            aria-pressed={mode === value}
+            onClick={() => {
+              setMode(value);
+              setResult(null);
+            }}
+          >
+            {labels[value]}
+          </Button>
+        ))}
       </div>
       <div className="writing-grid">
         <Panel>
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">YOUR WORDS</span>
-              <h2>
-                {mode === "summary"
-                  ? "Professional summary"
-                  : "Experience bullet points"}
-              </h2>
-            </div>
-            <Badge>Original draft</Badge>
-          </div>
-          <label className="sr-only" htmlFor="original-draft">
-            Original {mode === "summary" ? "summary" : "bullet points"}
+          <h2>{labels[mode]}</h2>
+          <ResumePicker
+            value={selected}
+            disabled={busy}
+            onChange={(value) => {
+              setSelected(value);
+              setResult(null);
+            }}
+          />
+          <label htmlFor="original-draft">
+            Original{" "}
+            {mode === "summary"
+              ? "summary"
+              : mode === "bullets"
+                ? "bullet points"
+                : "resume excerpt"}
           </label>
           <textarea
             id="original-draft"
             className="writing-editor"
-            rows={14}
-            maxLength={15000}
-            placeholder={
-              mode === "summary"
-                ? "Start with who you are, the work you do, and the strengths you can support with experience…"
-                : "Paste the bullet points you’d like to improve. Include only genuine responsibilities and results…"
-            }
+            rows={10}
+            maxLength={6000}
+            disabled={busy}
             value={draft}
-            onChange={(event) =>
-              setDrafts((value) => ({ ...value, [mode]: event.target.value }))
-            }
+            onChange={(event) => {
+              setDrafts((value) => ({ ...value, [mode]: event.target.value }));
+              setResult(null);
+            }}
+            placeholder="Copy an exact excerpt from the selected resume, or leave empty to use its detected summary or bullets."
           />
+          <div className="field">
+            <label htmlFor="improve-jd">
+              Job description{" "}
+              {mode === "keywords" ? "(required)" : "(optional)"}
+            </label>
+            <textarea
+              id="improve-jd"
+              rows={4}
+              maxLength={20000}
+              disabled={busy}
+              value={jd}
+              onChange={(event) => {
+                setJD(event.target.value);
+                setResult(null);
+              }}
+            />
+          </div>
+          <label className="consent-row">
+            <input
+              type="checkbox"
+              checked={consent}
+              disabled={busy}
+              onChange={(event) => setConsent(event.target.checked)}
+            />{" "}
+            Allow the server’s AI provider to process this excerpt. Optional;
+            requires server opt-in. Rules remain available.
+          </label>
           <div className="editor-actions">
-            <span className="muted text-sm">
-              {draft.length.toLocaleString()} characters · Browser-tab draft
-            </span>
             <Button
-              variant="ghost"
+              variant="secondary"
               disabled={!draft}
-              onClick={() => setDrafts((value) => ({ ...value, [mode]: "" }))}
+              onClick={() => copy(draft)}
             >
-              Clear
+              <Clipboard size={16} /> Copy original draft
+            </Button>
+            <Button
+              disabled={
+                busy ||
+                !selected ||
+                (mode === "keywords" && jd.trim().length < 30) ||
+                (!!jd.trim() && jd.trim().length < 30)
+              }
+              onClick={() => void improve()}
+            >
+              {busy ? "Reviewing…" : "Suggest improvements"}
             </Button>
           </div>
+          {busy && (
+            <p role="status">Checking source text and preparing suggestions…</p>
+          )}
+          {error && <Notice error>{error}</Notice>}
         </Panel>
-        <Panel className="improvement-result">
+        <Panel>
           <div className="section-heading">
-            <div>
-              <span className="eyebrow">A CLEARER VERSION</span>
-              <h2>Thoughtful improvements</h2>
-            </div>
+            <h2>Thoughtful improvements</h2>
             <Sparkles size={20} />
           </div>
-          <IntegrationNotice title="No rewrite has been generated.">
-            Cloud writing assistance is not connected yet. This space will show
-            an actual before-and-after rewrite with its source and rationale,
-            rather than a fabricated suggestion.
-          </IntegrationNotice>
-          <div className="writing-principles">
-            <p>
-              <Check size={15} /> No invented employers, skills or metrics
-            </p>
-            <p>
-              <Check size={15} /> Suggestions you can review and edit
-            </p>
-            <p>
-              <Check size={15} /> Clear labeling of AI and rule-based output
-            </p>
-          </div>
-          <Button
-            variant="secondary"
-            disabled={!draft}
-            onClick={() => {
-              void navigator.clipboard
-                .writeText(draft)
-                .then(() => toast("Original draft copied."))
-                .catch(() =>
-                  toast("Copy is unavailable in this browser.", true),
-                );
-            }}
-          >
-            <Clipboard size={16} /> Copy original draft
-          </Button>
+          {!result ? (
+            <Notice>No rewrite has been generated.</Notice>
+          ) : (
+            <>
+              <Notice>{result.notice}</Notice>
+              {result.items.length === 0 && (
+                <p>
+                  No safe edits were identified for this source. Try a different
+                  exact excerpt.
+                </p>
+              )}
+              {result.items.map((item, index) => (
+                <div className="suggestion-card" key={index}>
+                  <Badge>
+                    {item.source === "openai" ? "AI-generated" : "Rule-based"}
+                  </Badge>
+                  <h3>Original</h3>
+                  <p className="preserve-lines">{item.original}</p>
+                  <p>{item.rationale}</p>
+                  <label htmlFor={`suggestion-${index}`}>
+                    Review and edit suggestion {index + 1}
+                  </label>
+                  <textarea
+                    id={`suggestion-${index}`}
+                    rows={5}
+                    maxLength={8000}
+                    value={edits[index] ?? ""}
+                    onChange={(event) =>
+                      setEdits((values) =>
+                        values.map((value, i) =>
+                          i === index ? event.target.value : value,
+                        ),
+                      )
+                    }
+                  />
+                  <Button
+                    variant="secondary"
+                    onClick={() => copy(edits[index])}
+                  >
+                    Copy reviewed suggestion
+                  </Button>
+                </div>
+              ))}
+            </>
+          )}
         </Panel>
       </div>
     </>
