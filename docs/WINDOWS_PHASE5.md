@@ -3,7 +3,9 @@
 Commands are CMD syntax, not PowerShell or Bash. Execution here was Linux only;
 no Windows pass is claimed. Use Python 3.12 and Node 24 LTS. Never paste secrets
 into commands; edit ignored private files or inject them through a secret manager.
-Do not run live writes without explicit separate approval.
+Do not run live writes without explicit separate approval. For strictly offline
+localhost testing, use [the automated loopback verifier](#automated-offline-localhost-verification) below; do not use the cloud/staging
+commands or dotenv-based manual server startup for that task.
 
 ```bat
 cd C:\path\to\Resume-IQ-Full-Stack-Development
@@ -317,3 +319,79 @@ restrictions, password-free read-only mode, inherited-config isolation, exact
 private-path resolution with a synthetic USERPROFILE, write/DDL blocking,
 rollback/redaction, and the separately pinned live-mode reuse. Native Windows,
 staging access, migrations and deployments remain unexecuted.
+
+
+## Automated offline localhost verification
+
+From the repository folder, use the existing API environment directly. No
+activation, manual server startup, browser, Docker or private env file is needed:
+
+```bat
+.venv-api\Scripts\python.exe -m scripts.verify_localhost
+```
+
+The command uses the same interpreter for a temporary, single-process Uvicorn
+server bound **only to 127.0.0.1**. By default, that server binds an unused ephemeral
+port and keeps ownership of its listener throughout startup. The verifier sends
+only these four HTTP requests (plus bounded liveness polling):
+
+| Request | Expected status |
+|---|---|
+| GET `/api/health` | 200 |
+| GET `/api/ready` | 503, deliberately cloud-disabled |
+| GET `/api/me` | 401 |
+| POST `/api/resume/upload` | 404, legacy upload disabled; no file/body uploaded |
+
+Every line reports PASS/FAIL; exit code 0 means all four endpoint checks and
+cleanup passed. A 503 from readiness is a **PASS in this offline mode**, not a
+cloud configuration error. Live Supabase integration remains PENDING.
+
+The child receives only essential OS/bootstrap variables and these forced flags:
+`PYTHON_DOTENV_DISABLED=1`, `CLOUD_ENABLED=false`, `API_PUBLIC_MODE=false`,
+`API_LEGACY_UPLOAD_ENABLED=false`, `CLOUD_AI_ENABLED=false`. Cloud/provider,
+PostgreSQL, test-database opt-ins, proxy and Python startup credentials/settings
+are excluded. Python isolated mode excludes user site and PYTHONPATH injection.
+No root `.env` or `%USERPROFILE%\ResumeIQ-Private\staging.env` is read or copied.
+The verifier never calls `scripts.start_api`, migrations, Auth, Storage, uploads,
+the staging verifier, Render or Vercel. Application startup may create its usual
+local runtime folders/log file; application source and private env files remain
+unchanged. SQLAlchemy DB checkouts and external name resolution/connections are
+blocked in the child; Windows asyncio's internal loopback socket pairs still work.
+
+Requests go straight to literal loopback, without proxies, redirects, cookies or
+credentials. Startup is bounded to 20 seconds by default; each request to at most
+2 seconds. The verifier always stops only its own child, including on a failed
+check or Ctrl+C, with a bounded graceful wait and forced-termination fallback.
+It creates no worker/reloader subprocesses. It never kills a process by port/name.
+
+To choose a specific port, optionally run:
+
+```bat
+.venv-api\Scripts\python.exe -m scripts.verify_localhost --port 8000
+```
+
+If occupied, the verifier reports FAIL and leaves the existing listener alone.
+Use the default command or another port; do not terminate an unknown process.
+An optional `--startup-timeout 30` allows slower startup (valid range 1–60 seconds).
+Failures print static diagnostics rather than child logs/tracebacks. Do not enable
+cloud mode or load credentials to fix an offline failure.
+
+The existing unit/dependency/synthetic smoke verifier is still separate:
+
+```bat
+.venv-api\Scripts\python.exe -m scripts.verify_local
+```
+
+For a strictly offline run, do not enable `TEST_POSTGRES_URL` or
+`RESUMEIQ_TEST_POSTGRES_DISPOSABLE`; that older verifier honors explicit disposable
+DB opt-in. The new localhost verifier never honors it. No Docker or destructive
+PostgreSQL run is needed for localhost verification.
+
+Implementation verification was performed on Linux/Python 3.12, not on your Windows
+computer. The existing verifier freshly reported **254 passed, 0 failed, 17
+skipped, 0 errors**, dependency PASS and synthetic smoke PASS. The localhost
+verifier returned **200 / 503 / 401 / 404** and stopped its child. Additional local
+safety checks confirmed occupied-port preservation, server cleanup after an
+intentionally failed endpoint check, and bounded cleanup after startup timeout.
+Native Windows execution and live Supabase integration remain separate statuses;
+no deployment, database migration or live service access is part of this command.
