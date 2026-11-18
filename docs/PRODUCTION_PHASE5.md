@@ -272,7 +272,12 @@ Storage recovery; a database backup alone is not an object-store backup.
 - [ ] Advisory risk reviewed; runtime audit clean; development build inputs trusted.
 - [ ] Rollback rehearsal and operator approval to deploy/open traffic recorded.
 
-The existing npm development advisory remains: 17 high transitive affected packages
+**Current dependency review (2026-11-19):** [the detailed audit](DEPENDENCY_AUDIT_PHASE5.md)
+records withdrawal of the root advisory and fresh full/runtime counts of zero,
+with no dependency changes. Retain the historical checkpoint below for provenance;
+it is not the current active-advisory count.
+
+The original npm development report listed 17 high transitive affected packages
 via picomatch GHSA-fc5q-39xc-vjpf; latest upstream remains 4.0.7, still affected.
 No forced dependency override. Runtime npm audit is clean. Keep build tooling and
 untrusted glob/path inputs confined to CI/local development, use `npm ci`, restrict
