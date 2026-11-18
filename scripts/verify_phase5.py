@@ -9,7 +9,7 @@ import os
 import time
 from uuid import UUID
 from sqlalchemy import create_engine, text
-from scripts.verify_phase2 import Verifier, require, main
+from scripts.verify_phase2 import Verifier, require
 
 
 def digest(value):
@@ -17,8 +17,9 @@ def digest(value):
 
 
 class Phase5Verifier(Verifier):
-    def __init__(self, *args):
+    def __init__(self, *args, migration_audit_url=None):
         super().__init__(*args)
+        self.migration_audit_url = migration_audit_url
         self.draft_baseline, self.drafts, self.feature_ids = {}, {}, {}
         self.draft_data = {'template':'essential','draft':{'name':'Synthetic Verification Candidate',
             'title':'Engineer','email':'','phone':'','location':'','summary':'Synthetic Python SQL testing.',
@@ -43,7 +44,7 @@ class Phase5Verifier(Verifier):
 
     def audit_database(self):
         super().audit_database()
-        url = os.getenv('PHASE5_MIGRATION_AUDIT_DATABASE_URL')
+        url = self.migration_audit_url or os.getenv('PHASE5_MIGRATION_AUDIT_DATABASE_URL')
         require(url and url.startswith('postgresql+psycopg://'), 'Operator-only read-only migration audit connection is required.')
         audit = create_engine(url, hide_parameters=True, connect_args={'connect_timeout':5}, pool_pre_ping=True)
         try:
@@ -158,5 +159,74 @@ class Phase5Verifier(Verifier):
         return 1
 
 
+def main(argv=None):
+    """No implicit env access. Each network-capable mode is an explicit opt-in."""
+    import argparse
+    import logging
+    from pathlib import Path
+    from scripts.verify_phase2 import Settings, VerificationError
+    from scripts.staging_preflight import load_target, StagingReadOnly, report_environment
+    class Parser(argparse.ArgumentParser):
+        def error(self, message):
+            raise VerificationError('Invalid command arguments.')
+    parser = Parser(description='Staging-only verification; no migrations or deployments.')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--read-only', action='store_true')
+    mode.add_argument('--allow-live-writes', action='store_true')
+    parser.add_argument('--env-file', type=Path)
+    parser.add_argument('--expected-project-ref')
+    parser.add_argument('--expected-api-origin')
+    parser.add_argument('--cleanup-journal', type=Path)
+    previous = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        args = parser.parse_args(argv)
+        if not args.read_only and not args.allow_live_writes:
+            print('PENDING: choose --read-only or explicitly approve --allow-live-writes. No settings or services accessed.')
+            return 2
+        require(not args.cleanup_journal, 'Phase 5 recovery requires manual operator review.')
+        # USERPROFILE is used only to construct the requested default path. No
+        # other inherited cloud, DB, API, provider or password value is consulted.
+        path = args.env_file
+        if path is None:
+            profile = os.environ.get('USERPROFILE')
+            require(bool(profile), 'Use an explicit staging configuration path on this platform.')
+            path = Path(profile)/'ResumeIQ-Private'/'staging.env'
+        target = load_target(path, args.expected_project_ref)
+        print('PASS: independently pinned staging project, database routing and TLS configuration')
+        if args.read_only:
+            report_environment(target)
+            StagingReadOnly(target).run()
+            print('PENDING: deployed API/frontend checks, Auth sessions, private Storage behavior, two-user isolation and browser QA require separate verification.')
+            print('PASS: read-only audit completed; no accounts, files, Storage or application rows written.')
+            return 0
+        # The independently selected API pin prevents a staging env file from
+        # accidentally routing integration writes to the original application's API.
+        from scripts.verify_phase2 import origin
+        require(bool(args.expected_api_origin), 'Live testing requires an independent staging API origin pin.')
+        origin(args.expected_api_origin, local=True)
+        require(target.values.get('PHASE2_API_URL') == args.expected_api_origin, 'Staging API origin mismatch.')
+        # Password prompting, sessions and cleanup are reachable only in this branch.
+        settings = Settings.from_mapping(target.values)
+        engine = create_engine(target.runtime_url, hide_parameters=True, pool_pre_ping=True, connect_args={'connect_timeout':5})
+        try:
+            import httpx
+            from uuid import uuid4
+            with httpx.Client(timeout=90, follow_redirects=False) as client:
+                verifier = Phase5Verifier(settings, client, engine, Path('work')/('phase2-verification-'+uuid4().hex+'.json'),
+                                          migration_audit_url=target.audit_url.render_as_string(hide_password=False))
+                return verifier.run()
+        finally:
+            engine.dispose()
+    except VerificationError as error:
+        print('FAIL:', str(error))  # VerificationError labels contain no input values.
+        return 1
+    except (Exception, KeyboardInterrupt):
+        print('FAIL: staging verification could not complete; sensitive configuration and diagnostics suppressed.')
+        return 1
+    finally:
+        logging.disable(previous)
+
+
 if __name__=='__main__':
-    raise SystemExit(main(verifier_class=Phase5Verifier, request_timeout=90))
+    raise SystemExit(main())

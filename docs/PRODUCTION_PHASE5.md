@@ -164,11 +164,14 @@ provider-owned logging. Signed URLs are bearer credentials until expiry.
 
 ## Safe live verifier and recovery
 
-`python -m scripts.verify_phase5` with no write flag exits 2/PENDING **before any
-network or DB connection**. After explicit approval, use:
+`python -m scripts.verify_phase5` with no selected mode exits 2/PENDING before
+reading settings or connecting. See the [staging Windows workflow](WINDOWS_PHASE5.md#staging-verification-from-your-existing-private-file) for independent project
+pinning and the existing external private-file path. Read-only inspection needs
+separate connection approval and no test passwords. After separately approving
+staging writes and pinning a working staging API, use:
 
 ```bat
-python -m scripts.verify_phase5 --env-file .env --allow-live-writes
+python -m scripts.verify_phase5 --allow-live-writes --expected-project-ref YOUR_STAGING_PROJECT_REF --expected-api-origin https://YOUR-STAGING-API.onrender.com
 ```
 
 This logs into two dedicated accounts, checks restricted runtime/RLS/ACLs and
@@ -177,7 +180,8 @@ private Storage, then reads exact revision `0002_feature_links` using
 connection must point to the same staging project; it is not the runtime or a
 service deployment variable. Do not grant runtime access to `alembic_version`.
 No migration or user/role provisioning is run. Passwords may be securely prompted
-if absent from the operator environment. Logs contain static labels/counts only.
+if absent from the explicitly selected private file. Inherited settings are not
+used by the Phase 5 CLI. Logs contain static labels/counts only.
 Feature calls have a 90s timeout. Only a confirmed pre-operation `rate_limited` 429 with Retry-After 1–60s is waited out and retried once, so ownership-denial probes can respect production quotas. Network failures, timeouts, 5xx, busy/generic 429 and uncertain writes are never replayed.
 
 The verifier reuses Phase 2 synthetic uploads, baseline IDs, payload hashes and
@@ -331,3 +335,35 @@ Disposable tests now require both an explicit loopback `TEST_POSTGRES_URL` and
 URLs are rejected before connecting; do not acknowledge a persistent local DB.
 The existing Linux CI supplies the acknowledgement only for its fresh service
 container. Without explicit opt-in, the usual 17 PostgreSQL skips are expected.
+
+
+### Password-independent read-only staging mode
+
+`--read-only` is a separate CLI branch with no live verifier construction,
+credentials prompt, HTTP client, upload, cleanup or migration call. It reuses the
+Phase 2 catalog assertions through a SELECT-only adapter, with server-enforced
+READ ONLY transactions on runtime and separate revision-audit connections; both
+are rolled back and disposed. It additionally checks exact ownership policies,
+minimal runtime CRUD permissions and the Phase 4 ownership FK. Missing optional
+Auth/deployment configuration and unexecuted hosted checks are PENDING.
+
+The expected project reference must be supplied independently on the command
+line before any file is read. Supabase/JWT origins, all configured DB endpoints,
+roles, pooler username project suffixes and TLS options are validated before any
+connection. The live CLI additionally pins its API origin before entering the
+existing two-user workflow. Configuration comes only from the external selected
+file via `dotenv_values(interpolate=False)`; no root dotenv discovery or inherited
+secret fallback. The existing private staging file is neither moved nor modified.
+Read-only checks do not prove that opaque API keys belong to the intended project;
+that requires the separately approved live Auth/Storage checks.
+
+Implementation and synthetic local regression tests do not authorize accessing
+staging. No private staging file or real credentials were accessed during this
+implementation. No migration, destructive PostgreSQL suite, staging connection,
+remote operation, push or deployment was executed for this local-only change.
+
+Latest local-only staging-automation verification: **254 passed, 0 failed,
+17 skipped, 0 errors**; dependency check and synthetic smoke PASS. The 17
+destructive disposable PostgreSQL tests were intentionally not run under this
+authorization. These local/mock results do not establish staging or Windows
+verification.

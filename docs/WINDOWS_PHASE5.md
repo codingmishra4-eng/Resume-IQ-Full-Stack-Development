@@ -113,10 +113,10 @@ The no-flag command must print PENDING and exit 2 without connections. After the
 operator has supplied dedicated settings and approved staging writes:
 
 ```bat
-python -m scripts.verify_phase5 --env-file .env --allow-live-writes
+python -m scripts.verify_phase5 --allow-live-writes --expected-project-ref YOUR_STAGING_PROJECT_REF --expected-api-origin https://YOUR-STAGING-API.onrender.com
 ```
 
-The private verifier environment also needs the separate
+The private staging file also needs the separate
 `PHASE5_MIGRATION_AUDIT_DATABASE_URL` for a READ ONLY version check. Read cleanup
 journal instructions first. No migration runs automatically.
 
@@ -132,7 +132,8 @@ cd C:\path\to\Resume-IQ-Full-Stack-Development
 python -m pytest -o addopts="" -q --tb=short
 ```
 
-Expected without an explicitly opted-in disposable database: **227 passed,
+Expected without an explicitly opted-in disposable database after the staging-mode
+regressions: **254 passed,
 0 failed, 17 skipped, 0 errors**. The 17 skips are PostgreSQL migration/RLS tests,
 not suppressed unit failures. Root `.env` may remain in place unchanged.
 
@@ -182,8 +183,137 @@ set "RESUMEIQ_TEST_POSTGRES_DISPOSABLE="
 ```
 
 Wait until pg_isready succeeds. Use a fresh container on every run because tests
-create/drop roles, tables and grants. Expected full result: **244 passed,
-0 failed, 0 skipped, 0 errors**. No live Supabase database was used to obtain these
+create/drop roles, tables and grants. The previous isolation checkpoint ran **244 passed,
+0 failed, 0 skipped, 0 errors**. The new staging-mode tests add 27 cases; that
+expanded destructive PostgreSQL run was not executed under the local-only staging
+automation approval. No live Supabase database was used to obtain these
 counts. Windows execution remains pending unless the Windows CI/local run completes;
 Linux success is not a Windows pass. A Windows CI job now runs standard pytest
 with synthetic inherited migration settings.
+
+
+## Staging verification from your existing private file
+
+**Implementation is local only. No staging access is authorized yet.** The next
+command below is for review; run it only after separately approving staging
+read-only connections. It is not part of pytest or `scripts.verify_local`.
+
+The verifier uses your existing file in place:
+`%USERPROFILE%\ResumeIQ-Private\staging.env`. Do not move/copy it into the repo,
+print it with `type`, put credentials on the command line, or pass the whole file
+to the application server. It can contain operator-only audit credentials which
+are forbidden in the deployed API environment. The tool never modifies that file.
+
+1. Open CMD in the repository and activate the existing API environment:
+
+```bat
+.venv-api\Scripts\activate
+```
+
+2. Independently find the **staging project's Project Reference/Project ID** in
+   Supabase project settings. This is a public identifier, not an API key, JWT,
+   database password or original-project reference. Replace
+   `YOUR_STAGING_PROJECT_REF` in the command. The independent pin is required even
+   if the file contains `STAGING_PROJECT_REF`; both must match when present.
+3. After separate approval of read-only staging access, run one command:
+
+```bat
+python -m scripts.verify_phase5 --read-only --expected-project-ref YOUR_STAGING_PROJECT_REF
+```
+
+The default path is exactly the private file above, resolved from USERPROFILE.
+The equivalent explicit-path command, useful for review, is:
+
+```bat
+python -m scripts.verify_phase5 --read-only --env-file "%USERPROFILE%\ResumeIQ-Private\staging.env" --expected-project-ref YOUR_STAGING_PROJECT_REF
+```
+
+No test-user email/password, live-write flag, publishable key, secret Storage key,
+API server or frontend deployment is required for this database audit. Inherited
+shell variables and repository `.env` are not used as configuration fallbacks.
+File interpolation is disabled; target URLs must be complete literal values.
+
+Required existing settings (values stay private):
+
+| Setting | Expected staging configuration |
+|---|---|
+| `SUPABASE_URL` | Exact `https://<staging-project-ref>.supabase.co` |
+| `CLOUD_DATABASE_URL` | Restricted runtime URL for the same project, actual role `resumeiq_runtime` |
+| `PHASE5_MIGRATION_AUDIT_DATABASE_URL` | Separate operator connection for read-only revision inspection; existing `CLOUD_MIGRATION_DATABASE_URL` is accepted as a fallback |
+
+If both audit and migration variables exist, **every configured connection must
+match staging**. Neither may point to the original project. They are never used
+as the application's runtime. Runtime and audit database names must be `postgres`.
+Direct hosts must be `db.<staging-ref>.supabase.co`; supported Supabase pooler
+hosts must have the same project reference in the login username. A session-pooler
+runtime username is `resumeiq_runtime.<staging-ref>`; the actual role checked by
+PostgreSQL is still `resumeiq_runtime`. Prefer the session pooler for application
+compatibility. Other hosts, Unix socket/host query overrides and unexpected URL
+options fail before connecting. URLs require explicit TLS (`sslmode=require`,
+`verify-ca` or `verify-full`; prefer hostname-verifying TLS with a trusted CA).
+
+The tool checks configured JWT origins/ES256/audience and exact HTTPS CORS values.
+Missing deployment/JWT settings are reported PENDING instead of requiring user
+passwords. Public mode configured with legacy upload enabled is a FAIL.
+
+Expected report labels:
+
+- **PASS**: independently pinned staging routing/TLS, restricted runtime, denied
+  PUBLIC/Data API grants, enabled **and forced** RLS, exact ownership policies,
+  minimal CRUD grants and migration `0002_feature_links`.
+- **FAIL**: mismatch, unsafe configuration, excessive permissions, missing/wrong
+  policies/revision, denied required access, unavailable connection or timeout.
+  Driver diagnostics and credentials are suppressed. Do not loosen protections
+  to obtain PASS; review the private configuration and approved staging catalog.
+- **PENDING**: deployment flags/URLs not configured, Render/Vercel setup, Auth
+  redirects/emails, real JWT/Storage behavior, two-user tests and browser QA.
+
+All audit connections begin with `SET TRANSACTION READ ONLY`, bounded statement
+and lock timeouts, then run fixed SELECT/catalog queries and roll back. A narrow
+adapter also rejects INSERT/UPDATE/DELETE/DDL, multi-statements and attempts to
+turn read-only off. No login, migration, cleanup, journal creation, Storage
+request, deployment or application-row write is reachable from read-only mode.
+The role audit uses a transaction-local empty owner identity to check unscoped
+row denial; this is session state only. READ ONLY does not grant new privileges.
+
+### Optional integration tests: separate approval required
+
+Only after explicit staging-write approval, dedicated exclusive test users and a
+working staging API are available, review this separate command:
+
+```bat
+python -m scripts.verify_phase5 --allow-live-writes --expected-project-ref YOUR_STAGING_PROJECT_REF --expected-api-origin https://YOUR-STAGING-API.onrender.com
+```
+
+It uses the same existing private file. `PHASE2_API_URL` in that file must exactly
+match the independent staging API origin pin. Local API testing can instead pin
+`http://127.0.0.1:8000` if that process is intentionally configured for staging.
+The tool does not infer an API target from Render/Vercel or deploy either service.
+Missing/mismatched pins fail before login or database connection. Modern opaque
+API keys cannot be bound to a project offline: valid key ownership, hosted JWT
+verification and Storage policies remain checks of the approved integration run.
+
+The existing two-user auth/isolation, synthetic PDF/DOCX upload, private Storage,
+analysis/matching, rule-only improvement and builder/export checks are reused.
+User passwords are securely prompted only in this approved write mode when absent
+from the file. Cleanup retains the existing baseline/hash/ownership checks and
+keeps its credential-free recovery journal on uncertainty. Never apply a migration
+or replay a Phase 5 journal automatically. Exit 0 means the selected mode passed;
+exit 1 means FAIL; no selected mode exits 2/PENDING without reading settings.
+
+After the read-only report, remaining operator tasks are: review Render settings
+and runtime-only secrets; deploy only with separate approval; verify `/api/ready`;
+configure Vercel Root Directory `web` with public-only variables; set exact CORS
+and Supabase Auth callback/reset URLs; run approved two-user/browser checks; then
+review edge abuse protection, resource/load budgets, backups/rollback and launch
+approval. Read-only database PASS is not proof of working Auth, Storage or deployment.
+
+
+Local implementation verification (Linux/Python 3.12): **254 passed, 0 failed,
+17 skipped, 0 errors**; pip check and synthetic smoke PASS. The 27 new staging
+regressions use only temporary synthetic files and mock connections/transports.
+They cover project/DB/JWKS mismatch rejection before connections, routing/TLS
+restrictions, password-free read-only mode, inherited-config isolation, exact
+private-path resolution with a synthetic USERPROFILE, write/DDL blocking,
+rollback/redaction, and the separately pinned live-mode reuse. Native Windows,
+staging access, migrations and deployments remain unexecuted.

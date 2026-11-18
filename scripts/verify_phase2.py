@@ -67,10 +67,14 @@ class Settings:
 
     @classmethod
     def from_env(cls):
+        return cls.from_mapping(os.environ)
+
+    @classmethod
+    def from_mapping(cls, values):
         names = ('PHASE2_API_URL', 'SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SECRET_KEY',
                  'CLOUD_DATABASE_URL', 'SUPABASE_STORAGE_BUCKET', 'PHASE2_TEST_USER_A_EMAIL', 'PHASE2_TEST_USER_B_EMAIL')
-        require(all(os.getenv(name) for name in names), 'Required settings/test accounts are missing.')
-        api, supabase, publishable, secret, database, bucket, a, b = (os.environ[name] for name in names)
+        require(all(values.get(name) for name in names), 'Required settings/test accounts are missing.')
+        api, supabase, publishable, secret, database, bucket, a, b = (values[name] for name in names)
         origin(api, local=True)
         origin(supabase)
         require(re.fullmatch(r'sb_publishable_[A-Za-z0-9_-]+', publishable) and re.fullmatch(r'sb_secret_[A-Za-z0-9_-]+', secret), 'Modern API keys required.')
@@ -79,7 +83,7 @@ class Settings:
         require(a.casefold() != b.casefold(), 'Use two distinct dedicated test accounts.')
         passwords = []
         for letter in ('A', 'B'):
-            value = os.getenv(f'PHASE2_TEST_USER_{letter}_PASSWORD')
+            value = values.get(f'PHASE2_TEST_USER_{letter}_PASSWORD')
             if not value:
                 require(sys.stdin.isatty(), 'Use a secure interactive terminal or environment-injected test passwords.')
                 with warnings.catch_warnings():
