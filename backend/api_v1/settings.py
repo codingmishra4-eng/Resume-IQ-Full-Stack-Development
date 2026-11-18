@@ -34,6 +34,8 @@ class APISettings:
                 )
             except ValueError:
                 valid = False
+            if self.public_mode and not origin.startswith("https://"):
+                valid = False
             if not valid:
                 raise ValueError("API_ALLOWED_ORIGINS must contain exact HTTP(S) origins without paths or wildcards.")
 

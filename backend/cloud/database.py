@@ -1,4 +1,5 @@
 """Every resource query includes verified ownership, even with a bypass-RLS role."""
+import os
 from copy import copy
 from uuid import UUID
 from sqlalchemy import create_engine, select, event, text
@@ -14,6 +15,7 @@ class CloudSession(Session):
 @event.listens_for(CloudSession, 'after_begin')
 def set_transaction_identity(session, transaction, connection):
     if connection.dialect.name == 'postgresql':
+        connection.execute(text("SELECT set_config('statement_timeout','10000',true), set_config('lock_timeout','3000',true)"))
         # SET LOCAL semantics: identity is cleared on commit/rollback/pool return.
         # An unscoped runtime session receives an empty identity and sees no rows.
         owner = session.info.get('cloud_user_id')
@@ -26,8 +28,16 @@ class CloudDatabase:
         # Always qualify ORM tables on PostgreSQL; a temp/search_path relation
         # cannot shadow cloud tables. SQLite unit/local behavior stays unchanged.
         options = {'schema_translate_map': {None: 'public'}} if url.startswith('postgresql') else {}
+        pool = {}
+        if url.startswith('postgresql'):
+            for name, default, low, high in [('CLOUD_DB_POOL_SIZE',3,1,10),('CLOUD_DB_MAX_OVERFLOW',1,0,5),('CLOUD_DB_POOL_TIMEOUT',5,1,30)]:
+                value = int(os.getenv(name,str(default)))
+                if not low <= value <= high:
+                    raise ValueError('Invalid cloud database pool setting')
+                pool[{'CLOUD_DB_POOL_SIZE':'pool_size','CLOUD_DB_MAX_OVERFLOW':'max_overflow','CLOUD_DB_POOL_TIMEOUT':'pool_timeout'}[name]] = value
+            pool.update(pool_recycle=300, connect_args={'connect_timeout':5})
         self.engine = create_engine(url, pool_pre_ping=True, hide_parameters=True,
-                                    execution_options=options)
+                                    execution_options=options, **pool)
         if require_runtime:
             @event.listens_for(self.engine, 'checkout')
             def require_restricted_runtime(dbapi_connection, record, proxy):

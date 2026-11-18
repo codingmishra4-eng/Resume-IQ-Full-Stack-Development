@@ -42,7 +42,7 @@ python -m scripts.verify_phase2
 
 The last command prints PENDING and exits **2** without loading `.env`, prompting,
 connecting, or writing. Exit 2 is deliberately distinct from success (0) and
-failure (1). The opt-in PostgreSQL tests are skipped unless TEST_POSTGRES_URL is
+failure (1). The opt-in PostgreSQL tests are skipped unless RESUMEIQ_TEST_POSTGRES_DISPOSABLE=true and TEST_POSTGRES_URL is
 explicitly set. They are **destructive disposable-database tests**: never set
 TEST_POSTGRES_URL to Supabase, your persistent runtime DB or any valuable database.
 They run DDL/downgrades and create synthetic NOLOGIN roles only in local fixtures.

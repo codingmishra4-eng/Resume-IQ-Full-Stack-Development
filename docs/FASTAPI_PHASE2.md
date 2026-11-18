@@ -414,7 +414,7 @@ python -m pip check
 python -m pytest -ra
 python smoke_test.py
 # Optional real integration: disposable PostgreSQL only (DDL/downgrade test!)
-TEST_POSTGRES_URL=postgresql+psycopg://postgres@localhost:55432/resumeiq python -m pytest -ra
+RESUMEIQ_TEST_POSTGRES_DISPOSABLE=true TEST_POSTGRES_URL=postgresql+psycopg://postgres@localhost:55432/resumeiq python -m pytest -ra
 ```
 
 Local tests use real locally generated ES256/RS256 JWT signatures, mocked JWKS

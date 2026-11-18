@@ -67,10 +67,14 @@ class Settings:
 
     @classmethod
     def from_env(cls):
+        return cls.from_mapping(os.environ)
+
+    @classmethod
+    def from_mapping(cls, values):
         names = ('PHASE2_API_URL', 'SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SECRET_KEY',
                  'CLOUD_DATABASE_URL', 'SUPABASE_STORAGE_BUCKET', 'PHASE2_TEST_USER_A_EMAIL', 'PHASE2_TEST_USER_B_EMAIL')
-        require(all(os.getenv(name) for name in names), 'Required settings/test accounts are missing.')
-        api, supabase, publishable, secret, database, bucket, a, b = (os.environ[name] for name in names)
+        require(all(values.get(name) for name in names), 'Required settings/test accounts are missing.')
+        api, supabase, publishable, secret, database, bucket, a, b = (values[name] for name in names)
         origin(api, local=True)
         origin(supabase)
         require(re.fullmatch(r'sb_publishable_[A-Za-z0-9_-]+', publishable) and re.fullmatch(r'sb_secret_[A-Za-z0-9_-]+', secret), 'Modern API keys required.')
@@ -79,7 +83,7 @@ class Settings:
         require(a.casefold() != b.casefold(), 'Use two distinct dedicated test accounts.')
         passwords = []
         for letter in ('A', 'B'):
-            value = os.getenv(f'PHASE2_TEST_USER_{letter}_PASSWORD')
+            value = values.get(f'PHASE2_TEST_USER_{letter}_PASSWORD')
             if not value:
                 require(sys.stdin.isatty(), 'Use a secure interactive terminal or environment-injected test passwords.')
                 with warnings.catch_warnings():
@@ -180,9 +184,13 @@ class Verifier:
             self.created[user['id']] = set()
         self.save_journal()
 
-    def save_journal(self):
+    def journal_data(self):
         data = {'version': 1, 'created': {owner: sorted(ids) for owner, ids in self.created.items()}, 'hashes': sorted(self.hashes), 'baseline': {owner: sorted(ids) for owner, ids in self.baseline.items()},
                 'uncertain': {owner: sorted(ids) for owner, ids in self.uncertain.items()}, 'ambiguous_upload': self.ambiguous_upload, 'paths': self.paths}
+        return data
+
+    def save_journal(self):
+        data = self.journal_data()
         self.journal.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(prefix='.phase2-', dir=self.journal.parent)
         try:
@@ -384,7 +392,7 @@ class Verifier:
         logging.disable(logging.CRITICAL)
         try:
             data = json.loads(source.read_text(encoding='utf-8'))
-            require(data.get('version') == 1, 'Unsupported recovery journal.')
+            require(data.get('version') == 1 and 'phase5' not in data, 'Unsupported recovery journal; use its matching operator procedure.')
             self.audit_database()
             self.bucket_private()
             self.login()  # Fresh local Auth sessions; no tokens are stored in journals.
@@ -454,7 +462,7 @@ class Verifier:
         return 0 if self.failed == 0 else 1
 
 
-def main(argv=None):
+def main(argv=None, verifier_class=Verifier, request_timeout=30):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--env-file', type=Path, help='Explicit local ignored environment file; none is loaded by default.')
     parser.add_argument('--cleanup-journal', type=Path, help='Replay a retained journal after all old requests have settled.')
@@ -474,8 +482,8 @@ def main(argv=None):
         engine = create_engine(settings.database, pool_pre_ping=True, hide_parameters=True)
         journal = Path('work') / ('phase2-verification-' + uuid4().hex + '.json')
         try:
-            with httpx.Client(timeout=30, follow_redirects=False) as client:
-                verifier = Verifier(settings, client, engine, journal)
+            with httpx.Client(timeout=request_timeout, follow_redirects=False) as client:
+                verifier = verifier_class(settings, client, engine, journal)
                 return verifier.recover(args.cleanup_journal) if args.cleanup_journal else verifier.run()
         finally:
             engine.dispose()

@@ -36,9 +36,13 @@ def current_user(request: Request) -> Identity:
     verifier = request.app.state.token_verifier
     if len(parts) == 2 and parts[0].lower() == 'bearer' and len(parts[1]) <= 16384 and verifier:
         try:
-            return verifier.verify(parts[1])
+            identity = verifier.verify(parts[1])
         except Exception:
             pass  # No token, key-fetch error, or claim details cross the API boundary.
+        else:
+            if request.app.state.api_settings.public_mode:
+                request.app.state.user_rate_limit.check(identity.id, request.method not in {'GET','HEAD','OPTIONS'})
+            return identity
     error = APIError('unauthorized', 'Authentication required.', 401)
     error.headers = {'WWW-Authenticate': 'Bearer'}
     raise error
