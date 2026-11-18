@@ -1,0 +1,65 @@
+name: Phase 5 Windows frontend verification
+
+on:
+  pull_request:
+    branches: [codex/phase-5-production-readiness]
+    paths:
+      - 'web/**'
+      - '.github/workflows/phase5-frontend-windows.yml'
+      - 'docs/FRONTEND_WINDOWS_PHASE5.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Windows Node 24 frontend checks
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+        shell: pwsh
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Report tool versions
+        run: |
+          node --version
+          npm --version
+      - name: Require credential-free verification
+        run: |
+          $files = @('.env', '.env.local', '.env.production', '.env.production.local', '.env.test', '.env.test.local', '.env.development', '.env.development.local')
+          foreach ($file in $files) {
+            if (Test-Path -LiteralPath $file) {
+              throw 'Private dotenv files are not permitted in frontend verification.'
+            }
+          }
+          $configured = Get-ChildItem Env: | Where-Object { $_.Name -match '^(NEXT_PUBLIC_|SUPABASE_|CLOUD_|OPENAI_|PHASE2_|PHASE5_|DATABASE_URL$)' -and $_.Value }
+          if ($configured) {
+            throw 'Service configuration is not permitted in frontend verification.'
+          }
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint (zero warnings)
+        run: npm run lint -- --max-warnings=0
+      - name: Unit and component tests
+        run: npm test
+      - name: Production build
+        run: npm run build

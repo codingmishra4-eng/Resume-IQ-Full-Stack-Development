@@ -1,5 +1,14 @@
 name: Phase 5 local readiness
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+    # A dedicated Windows workflow checks frontend-automation-only changes.
+    # Do not provision backend test databases for these CI/documentation files.
+    # Any application/backend/web source change still runs this full workflow.
+    paths-ignore:
+      - '.github/workflows/phase5-frontend-windows.yml'
+      - '.github/workflows/phase5-checks.yml'
+      - 'docs/FRONTEND_WINDOWS_PHASE5.md'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
