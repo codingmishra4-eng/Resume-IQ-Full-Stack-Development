@@ -1,0 +1,83 @@
+name: Phase 5 frontend dependency audit
+
+on:
+  pull_request:
+    branches: [codex/phase-5-production-readiness]
+    paths:
+      - 'web/**'
+      - 'docs/**'
+      - '.github/workflows/phase5-dependency-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Audit and frontend checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Report tool versions
+        run: |
+          node --version
+          npm --version
+      - name: Require credential-free verification
+        id: safety
+        run: >-
+          node -e "const fs=require('node:fs');
+          for(const file of ['.env','.env.local','.env.production','.env.production.local','.env.test','.env.test.local','.env.development','.env.development.local'])
+          if(fs.existsSync(file))throw Error('Private dotenv files are not permitted.');
+          for(const name of Object.keys(process.env))
+          if(['NEXT_PUBLIC_','SUPABASE_','CLOUD_','OPENAI_','PHASE2_','PHASE5_','DATABASE_URL'].some(prefix=>name.startsWith(prefix))&&process.env[name])
+          throw Error('Service configuration is not permitted.');"
+      - name: Install locked dependencies
+        id: install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint (zero warnings)
+        run: npm run lint -- --max-warnings=0
+      - name: Unit and component tests
+        run: npm test
+      - name: Production build
+        id: build
+        run: npm run build
+      - name: Full dependency audit
+        id: full_audit
+        run: npm audit --json > audit-full.json
+      - name: Production dependency audit
+        if: ${{ !cancelled() && steps.safety.outcome == 'success' && steps.install.outcome == 'success' && steps.build.outcome == 'success' }}
+        run: npm audit --omit=dev --json > audit-runtime.json
+      - name: Preserve audit reports
+        if: ${{ !cancelled() && (steps.full_audit.outcome == 'success' || steps.full_audit.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-${{ matrix.os }}
+          path: |
+            web/audit-full.json
+            web/audit-runtime.json
+          if-no-files-found: error
+          retention-days: 7

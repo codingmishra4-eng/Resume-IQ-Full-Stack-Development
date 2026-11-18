@@ -1,5 +1,14 @@
 name: Phase 5 local readiness
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+    # Docs/audit-only changes use the dedicated frontend audit matrix. Do not
+    # start database migration tests for an advisory review. Source changes still
+    # run the complete workflow; its explicit manual dispatch remains available.
+    paths-ignore:
+      - 'docs/**'
+      - '.github/workflows/phase5-dependency-audit.yml'
+      - '.github/workflows/phase5-checks.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

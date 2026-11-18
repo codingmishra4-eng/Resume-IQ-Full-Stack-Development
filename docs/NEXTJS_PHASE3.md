@@ -268,7 +268,12 @@ No visual browser, responsive screenshot or Playwright execution is claimed.
 The supplied browser tests are ready for operator execution. Local type/lint/
 unit/build checks and existing Python regressions are recorded in the PR.
 
-## Known development-tool dependency risk
+## Historical development-tool dependency risk
+
+**Current review (2026-11-19):** the root advisory below was withdrawn on November
+18; fresh full and runtime audits now report zero with the lockfile unchanged.
+See [the detailed Phase 5 advisory review](DEPENDENCY_AUDIT_PHASE5.md). The following
+paragraph records the earlier checkpoint, not a current active alert count.
 
 The runtime-only audit reports **0 vulnerabilities**. The full audit reports
 **17 high-severity affected development packages**, all propagated from the
