@@ -1,25 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useAuth, useWorkspace } from "./providers";
-import { Badge, Button, Notice, PageHeading, Panel, TextLink } from "./ui";
+import { Button, Notice, TextLink } from "./ui";
+import { FileText, ChevronDown, ArrowUpRight } from "lucide-react";
+import { AnalysisReport, ReportLoading } from "./analysis/report";
+import "./analysis/analyzer.css";
 import { FileUpload } from "./documents";
-import { MatchView } from "./match-result";
 import type { AnalysisRecord, LinkedAnalysis } from "@/lib/features";
 import { date } from "@/lib/format";
-const sections = [
-  ["overview", "Overview"],
-  ["parseability", "Parseability"],
-  ["impact", "Impact"],
-  ["repetition", "Repeated words"],
-  ["grammar", "Grammar"],
-  ["sections", "Essential sections"],
-  ["contact", "Contact"],
-  ["formatting", "Formatting"],
-  ["match", "Job match"],
-  ["skills", "Skill gaps"],
-  ["templates", "Templates"],
-  ["recommendations", "Recommendations"],
-];
 export function Analyzer() {
   const { api } = useAuth();
   const { resumes, refresh } = useWorkspace();
@@ -96,375 +84,168 @@ export function Analyzer() {
       setReading(false);
     }
   }
-  const report = record && record.resume_id === resumeId ? record.report : null;
-  function category(key: string) {
-    const value = report?.ats.categories[key];
-    return value ? (
-      <>
-        <h3>
-          {value.name}: {value.score.toFixed(1)}/100
-        </h3>
-        <ul className="feature-list">
-          {value.checks.map((check, index) => (
-            <li key={index}>
-              <Badge>{check.status}</Badge> <strong>{check.label}</strong> —{" "}
-              {check.detail}
-            </li>
-          ))}
-        </ul>
-      </>
-    ) : null;
-  }
-  const waiting = (
-    <p className="muted">
-      Run analysis to compute this section from your stored document.
-    </p>
-  );
+  const currentRecord = record && record.resume_id === resumeId ? record : null;
   return (
-    <>
-      <PageHeading
-        eyebrow="RESUME WORKSPACE"
-        title="Look closer. Move forward."
-        description="Detailed analysis from your actual document. Scores are documented heuristics, not ATS certification."
-      />
-      <div className="analyzer-intro-grid">
-        <Panel>
-          <h2>Add a resume</h2>
+    <div className="analyzer-workspace">
+      <header className="ar-page-header">
+        <div>
+          <span className="ar-page-context">
+            Resume workspace <span aria-hidden="true">/</span> Analyzer
+          </span>
+          <h1>Understand your resume.</h1>
+          <p>A clearer view of your document, and what to refine next.</p>
+        </div>
+        <TextLink href="/documents">Your documents</TextLink>
+      </header>
+      {!selected && (
+        <section className="ar-upload-start">
+          <span className="ar-file-symbol">
+            <FileText size={25} aria-hidden="true" />
+          </span>
+          <h2>Start with your document</h2>
+          <p>Upload a PDF or DOCX to get a private, document-based analysis.</p>
           <FileUpload onSuccess={(item) => setSelectedId(item.id)} />
-        </Panel>
-        <Panel>
-          <h2>Analyze your document</h2>
-          <div className="field">
-            <label htmlFor="analysis-resume">Resume to review</label>
-            <select
-              id="analysis-resume"
-              value={resumeId ?? ""}
-              disabled={busy || reading || !resumes.data?.length}
-              onChange={(event) => setSelectedId(event.target.value)}
-            >
-              <option value="" disabled>
-                Select a resume
-              </option>
-              {resumes.data?.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.metadata.file_name} · {date(item.created_at)} ·{" "}
-                  {item.id.slice(0, 6)}
+        </section>
+      )}
+      {selected && (
+        <section
+          className="ar-controls"
+          aria-busy={busy || reading}
+          aria-labelledby="analysis-controls-title"
+        >
+          <div className="ar-selected-document">
+            <div className="ar-document-name">
+              <span className="ar-file-symbol">
+                <FileText size={20} aria-hidden="true" />
+              </span>
+              <div>
+                <h2 id="analysis-controls-title">
+                  {selected.metadata.file_name}
+                </h2>
+                <p>
+                  {selected.metadata.file_type.toUpperCase()}{" "}
+                  <span aria-hidden="true">·</span>{" "}
+                  {selected.metadata.word_count.toLocaleString()} words{" "}
+                  <span aria-hidden="true">·</span> {selected.metadata.pages}{" "}
+                  {selected.metadata.pages === 1 ? "page" : "pages"}
+                </p>
+              </div>
+            </div>
+            <details className="ar-upload-another">
+              <summary>
+                Upload another resume{" "}
+                <ChevronDown size={15} aria-hidden="true" />
+              </summary>
+              <fieldset disabled={busy || reading}>
+                <FileUpload onSuccess={(item) => setSelectedId(item.id)} />
+              </fieldset>
+            </details>
+          </div>
+          <div className="ar-control-fields">
+            <div className="field">
+              <label htmlFor="analysis-resume">Resume to review</label>
+              <select
+                id="analysis-resume"
+                value={resumeId ?? ""}
+                disabled={busy || reading || !resumes.data?.length}
+                onChange={(event) => setSelectedId(event.target.value)}
+              >
+                <option value="" disabled>
+                  Select a resume
                 </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="analysis-jd">Optional job description</label>
-            <textarea
-              id="analysis-jd"
-              rows={3}
-              maxLength={20000}
-              disabled={busy}
-              value={jd}
-              onChange={(event) => setJD(event.target.value)}
-            />
-            <small>
-              Leave empty for general analysis, or supply 30–20,000 characters.
-            </small>
-          </div>
-          <Button
-            disabled={
-              !resumeId ||
-              busy ||
-              reading ||
-              (!!jd.trim() && jd.trim().length < 30)
-            }
-            onClick={() => void analyze()}
-          >
-            {busy ? "Analyzing…" : "Run analysis"}
-          </Button>
-          {(busy || reading) && (
-            <p role="status">
-              {busy
-                ? "Reading the private document and computing report sections…"
-                : "Loading saved analysis…"}
-            </p>
-          )}
-        </Panel>
-      </div>
-      {resumes.error && <Notice error>{resumes.error}</Notice>}
-      {loadedFor === resumeId && error && <Notice error>{error}</Notice>}
-      {!selected ? (
-        <Notice>Add a resume to begin.</Notice>
-      ) : (
-        <>
-          <div className="field">
-            <label htmlFor="analysis-history">Saved analysis history</label>
-            <select
-              id="analysis-history"
-              value={record?.id ?? ""}
-              disabled={busy || reading || !records.length}
-              onChange={(event) => void load(event.target.value)}
-            >
-              <option value="" disabled>
-                {records.length
-                  ? "Select a saved report"
-                  : "No saved analysis yet"}
-              </option>
-              {records
-                .filter((item) => item.resume_id === resumeId)
-                .map((item) => (
+                {resumes.data?.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {date(item.created_at)} ·{" "}
-                    {item.ats_score?.toFixed(1) ?? "No score"} ·{" "}
+                    {item.metadata.file_name} · {date(item.created_at)} ·{" "}
                     {item.id.slice(0, 6)}
                   </option>
                 ))}
-            </select>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="analysis-history">Saved analysis history</label>
+              <select
+                id="analysis-history"
+                value={record && record.resume_id === resumeId ? record.id : ""}
+                disabled={busy || reading || !records.length}
+                onChange={(event) => void load(event.target.value)}
+              >
+                <option value="" disabled>
+                  {records.length
+                    ? "Select a saved report"
+                    : "No saved analysis yet"}
+                </option>
+                {records
+                  .filter((item) => item.resume_id === resumeId)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {date(item.created_at)} ·{" "}
+                      {item.ats_score?.toFixed(1) ?? "No score"} ·{" "}
+                      {item.id.slice(0, 6)}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <Button
+              className="ar-run-button"
+              disabled={
+                !resumeId ||
+                busy ||
+                reading ||
+                (!!jd.trim() && jd.trim().length < 30)
+              }
+              onClick={() => void analyze()}
+            >
+              {busy ? "Analyzing…" : "Run analysis"}
+              {!busy && <ArrowUpRight size={16} aria-hidden="true" />}
+            </Button>
           </div>
-          <nav className="report-nav" aria-label="Report sections">
-            {sections.map(([id, label]) => (
-              <a key={id} href={`#report-${id}`}>
-                {label}
-              </a>
-            ))}
-          </nav>
-          <div className="report-content">
-            <Panel id="report-overview" className="report-section">
-              <h2>Resume overview</h2>
-              <div className="metadata-grid">
-                {[
-                  ["Format", selected.metadata.file_type.toUpperCase()],
-                  ["Word count", selected.metadata.word_count],
-                  ["Pages detected", selected.metadata.pages],
-                  ["Bullet points", selected.metadata.bullet_count],
-                ].map(([label, value]) => (
-                  <div key={label}>
-                    <span>{label}</span>
-                    <strong>{value}</strong>
-                  </div>
-                ))}
-              </div>
-              {report ? (
-                <>
-                  <h3>
-                    Estimated ATS score: {report.ats.overall.toFixed(1)}/100
-                  </h3>
-                  <p>{report.disclaimer}</p>
-                  <h4>Strengths</h4>
-                  <ul>
-                    {report.ats.strengths.map((value, index) => (
-                      <li key={index}>{value}</li>
-                    ))}
-                  </ul>
-                  <h4>Areas to review</h4>
-                  <ul>
-                    {report.ats.weaknesses.map((value, index) => (
-                      <li key={index}>{value}</li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-parseability" className="report-section">
-              <h2>Estimated ATS parseability</h2>
-              {report ? (
-                <>
-                  {Object.entries(report.ats.categories).map(([key, value]) => (
-                    <p key={key}>
-                      {value.name} · {value.score.toFixed(1)}/100 · weight{" "}
-                      {(value.weight * 100).toFixed(0)}%
-                    </p>
-                  ))}
-                  {category("readability")}
-                  {category("structure")}
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-impact" className="report-section">
-              <h2>Quantified impact</h2>
-              {report ? (
-                <p>
-                  {report.impact.count} of {report.impact.bullets} detected
-                  bullets contain quantified evidence. Review whether each
-                  number demonstrates an outcome; number detection alone does
-                  not establish impact.
-                </p>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-repetition" className="report-section">
-              <h2>Repeated words</h2>
-              {report ? (
-                <>
-                  <div className="chips">
-                    {report.ats.writing.repeated_words.map(([word, total]) => (
-                      <Badge key={word}>
-                        {word} · {total}
-                      </Badge>
-                    ))}
-                  </div>
-                  {!report.ats.writing.repeated_words.length && (
-                    <p>No repeated words flagged by the heuristic.</p>
-                  )}
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-grammar" className="report-section">
-              <h2>Spelling and grammar</h2>
-              {report ? (
-                <>
-                  {(["spelling", "grammar", "weak_phrasings"] as const).map(
-                    (key) => (
-                      <div key={key}>
-                        <h3>{key.replaceAll("_", " ")}</h3>
-                        {report.ats.writing[key].length ? (
-                          report.ats.writing[key].map((issue, index) => (
-                            <div className="suggestion-card" key={index}>
-                              <strong>{issue.message}</strong>
-                              <p>{issue.context}</p>
-                              <p>{issue.suggestion}</p>
-                            </div>
-                          ))
-                        ) : (
-                          <p>No issues flagged by these limited checks.</p>
-                        )}
-                      </div>
-                    ),
-                  )}
-                  <p>
-                    {report.ats.writing.passive_count} possible passive
-                    constructions. {report.ats.writing.long_sentences.length}{" "}
-                    long sentences flagged.
-                  </p>
-                  {report.ats.writing.long_sentences.map((text, index) => (
-                    <p key={index}>{text}</p>
-                  ))}
-                  <p>
-                    Buzzwords:{" "}
-                    {report.ats.writing.buzzwords.join(", ") || "None flagged"}
-                  </p>
-                  <TextLink href="/improve">
-                    Review writing suggestions
-                  </TextLink>
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-sections" className="report-section">
-              <h2>Essential sections</h2>
-              {report ? (
-                <>
-                  <div className="chips">
-                    {report.sections.map((value, index) => (
-                      <Badge key={`${value}-${index}`}>{value}</Badge>
-                    ))}
-                  </div>
-                  {category("completeness")}
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-contact" className="report-section">
-              <h2>Contact information</h2>
-              {report ? (
-                <>
-                  <p>Presence checks only; contact values are excluded.</p>
-                  {Object.entries(report.contact).map(([key, value]) => (
-                    <p key={key}>
-                      {key.replaceAll("_", " ")}:{" "}
-                      {value ? "Detected" : "Not detected"}
-                    </p>
-                  ))}
-                  {category("contact")}
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-formatting" className="report-section">
-              <h2>ATS formatting</h2>
-              {report ? category("formatting") : waiting}
-              <p>
-                {selected.metadata.tables_detected} tables ·{" "}
-                {selected.metadata.images_detected} images detected.
-              </p>
-            </Panel>
-            <Panel id="report-match" className="report-section">
-              <h2>Job description match</h2>
-              {report?.job_match ? (
-                <MatchView result={report.job_match} />
-              ) : (
-                <p>
-                  Supply a job description when running analysis for a
-                  role-specific comparison.{" "}
-                  <TextLink href="/job-match">Open Job Match</TextLink>
-                </p>
-              )}
-            </Panel>
-            <Panel id="report-skills" className="report-section">
-              <h2>Skill gaps</h2>
-              {report ? (
-                <>
-                  {category("keywords")}
-                  <p>
-                    Detected resume keywords:{" "}
-                    {report.keywords.join(", ") || "None detected"}
-                  </p>
-                  {report.job_match ? (
-                    <p>
-                      Missing from resume:{" "}
-                      {report.job_match.missing.join(", ") || "None detected"}.
-                      Only add skills you genuinely have.
-                    </p>
-                  ) : (
-                    <p>
-                      A job description is required to identify role-specific
-                      gaps.
-                    </p>
-                  )}
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-templates" className="report-section">
-              <h2>Templates</h2>
-              {report ? (
-                <>
-                  <p>
-                    Supported single-column export choices:{" "}
-                    {report.template_ids.join(", ")}. The builder shows the
-                    actual server mapping.
-                  </p>
-                  <TextLink href="/builder">Open resume builder</TextLink>
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-            <Panel id="report-recommendations" className="report-section">
-              <h2>Recommendations</h2>
-              {report ? (
-                <>
-                  <ul className="feature-list">
-                    {report.ats.recommendations.map((value, index) => (
-                      <li key={index}>{value}</li>
-                    ))}
-                  </ul>
-                  <p>{report.disclaimer}</p>
-                </>
-              ) : (
-                waiting
-              )}
-            </Panel>
-          </div>
-        </>
+          <details className="ar-job-context">
+            <summary>
+              Add a job description <span>(optional)</span>
+              <ChevronDown size={15} aria-hidden="true" />
+            </summary>
+            <div className="field">
+              <label htmlFor="analysis-jd">Optional job description</label>
+              <textarea
+                id="analysis-jd"
+                rows={4}
+                maxLength={20000}
+                disabled={busy}
+                value={jd}
+                onChange={(event) => setJD(event.target.value)}
+                placeholder="Paste a target role to include job matching and skill-gap findings."
+              />
+              <small>
+                30–20,000 characters, or leave empty for general analysis.
+              </small>
+            </div>
+          </details>
+        </section>
       )}
-    </>
+      {resumes.error && <Notice error>{resumes.error}</Notice>}
+      {loadedFor === resumeId && error && <Notice error>{error}</Notice>}
+      {(busy || reading) && selected && <ReportLoading creating={busy} />}
+      {selected && currentRecord ? (
+        <AnalysisReport
+          key={currentRecord.id}
+          record={currentRecord}
+          resume={selected}
+        />
+      ) : selected && !reading && !busy ? (
+        <section className="ar-report-empty">
+          <span className="ar-field-caption">Your next step</span>
+          <h2>Ready for a closer look?</h2>
+          <p>
+            Run an analysis to see your estimated ATS score, writing findings
+            and recommendations here.
+          </p>
+          <p className="ar-note">
+            Only results calculated from your document will appear. Your
+            original file stays unchanged.
+          </p>
+        </section>
+      ) : null}
+      {!selected && resumes.data === null && <ReportLoading />}
+    </div>
   );
 }
