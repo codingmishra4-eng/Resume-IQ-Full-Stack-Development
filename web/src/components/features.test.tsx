@@ -68,7 +68,8 @@ it("renders all twelve actual report sections and saved report history", async (
       .getByRole("navigation", { name: "Report sections" })
       .querySelectorAll("a"),
   ).toHaveLength(12);
-  expect(screen.getByText("testing · 4")).toBeInTheDocument();
+  await user.click(screen.getByRole("link", { name: "Repeated words" }));
+  expect(screen.getByRole("row", { name: "testing 4" })).toBeInTheDocument();
   expect(screen.getByLabelText("Saved analysis history")).toHaveValue(id);
   expect(refresh).toHaveBeenCalled();
 });
@@ -81,6 +82,42 @@ it("loads persisted reports without creating a new one", async () => {
     await screen.findByText("Estimated ATS score: 72.0/100"),
   ).toBeInTheDocument();
   expect(api.createAnalysis).not.toHaveBeenCalled();
+});
+it("keeps the optional job description and selected resume in the existing request", async () => {
+  const user = userEvent.setup();
+  render(<Analyzer />);
+  const run = await screen.findByRole("button", { name: "Run analysis" });
+  await waitFor(() => expect(run).toBeEnabled());
+  await user.click(screen.getByText("Add a job description"));
+  await user.type(
+    screen.getByLabelText("Optional job description"),
+    "Too short",
+  );
+  expect(run).toBeDisabled();
+  const jd = "Python and Docker engineer needed for a testing project.";
+  fireEvent.change(screen.getByLabelText("Optional job description"), {
+    target: { value: jd },
+  });
+  await user.click(run);
+  await screen.findByText("Estimated ATS score: 72.0/100");
+  expect(api.createAnalysis).toHaveBeenCalledWith(id, jd);
+});
+it("preserves input and supports retry after an analysis error", async () => {
+  api.createAnalysis.mockRejectedValueOnce(new Error("Analysis unavailable."));
+  const user = userEvent.setup();
+  render(<Analyzer />);
+  const run = await screen.findByRole("button", { name: "Run analysis" });
+  await waitFor(() => expect(run).toBeEnabled());
+  await user.click(run);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Analysis unavailable.",
+  );
+  expect(screen.getByLabelText("Resume to review")).toHaveValue(id);
+  expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+  await user.click(run);
+  expect(
+    await screen.findByText("Estimated ATS score: 72.0/100"),
+  ).toBeInTheDocument();
 });
 it("compares an owned resume and clears stale results when the input changes", async () => {
   const user = userEvent.setup();
