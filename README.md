@@ -1,6 +1,6 @@
 # ResumeIQ v1.0.0
 
-**AI-powered resume analyzer, ATS checker & resume builder — local-first.**
+**AI-powered resume analyzer, ATS checker & resume builder — local Streamlit mode and optional authenticated cloud API.**
 
 ResumeIQ parses a PDF or DOCX resume entirely on your machine, computes a
 transparent *estimated ATS compatibility* score across six categories, compares
@@ -25,7 +25,7 @@ resume builder with 15 prebuilt templates that export to ATS-safe PDF and DOCX.
 | ✨ **AI Improve** | Before/after rewrites: summary, weak bullets, stronger verbs, JD keyword weaving — with Accept / Reject / Edit per suggestion |
 | 🗂 **Resume Builder** | 15 templates across General / ATS / Engineering / Student / Corporate / Data / Design / Academic, live HTML preview, PDF + single-column ATS-safe DOCX export, SQLite save/load |
 | 🕘 **History** | Every analysis stored in SQLite; reopen full reports, compare any two analyses, delete records |
-| 🔒 **Privacy** | Local-first: parsing, scoring and storage all happen on your device. No resume text leaves your machine (unless *you* configure an OpenAI key) |
+| 🔒 **Privacy** | Streamlit local mode stores data on its host device; optional cloud mode sends resumes to the backend, PostgreSQL and private Supabase Storage. OpenAI configuration can also send snippets to its API. |
 
 ## 🚀 Quick start
 
@@ -56,10 +56,25 @@ Set `OPENAI_API_KEY=sk-...` in `.env`. AI features activate automatically;
 any API failure silently falls back to the deterministic rule engine and the
 UI labels which source produced each suggestion (`🤖 OpenAI` vs `⚙️ Rule-based`).
 
+## FastAPI migration (Phase 1)
+
+The original Streamlit application remains available. The separate FastAPI entry
+point preserves `/`, `/api/health`, and `/api/resume/upload` with typed contracts,
+restricted metadata responses, upload validation and explicit CORS configuration.
+Install the pinned API dependencies in a separate Python 3.12 environment:
+
+```bash
+python -m pip install -r requirements-api.txt
+python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000
+```
+
+See [FastAPI setup, contracts, privacy changes and limits](docs/FASTAPI_PHASE1.md).
+The API has no authentication yet and is not production ready.
+
 ## 🧪 Tests & smoke check
 
 ```bash
-python -m pytest          # 45 tests across 6 test files
+python -m pytest          # existing suite; install requirements-api.txt for API tests
 python smoke_test.py      # end-to-end pipeline check → prints "SMOKE OK"
 ```
 
@@ -144,6 +159,49 @@ look — Word files face harsher parser limits, so ResumeIQ keeps them safe.
 
 ## 📜 License / privacy
 
-Local-first design; resume content never leaves your device except when you
-explicitly configure an OpenAI key (then job description + snippets go to the
-API). The SQLite database stays in `data/`.
+In local Streamlit mode, processing and SQLite storage stay on the machine running
+Streamlit (`data/`). If that machine is a remote server, uploads leave your browser
+device. Configuring an OpenAI key can send resume snippets and job descriptions to
+the API. Optional Phase 2 cloud mode uploads original files to private Supabase
+Storage and stores user-owned metadata in PostgreSQL. See
+[Phase 2 setup, security and retention](docs/FASTAPI_PHASE2.md).
+
+
+## Phase 2 cloud backend
+
+Phase 1 paths remain compatible. New `/api/v1` endpoints validate Supabase access
+JWTs, scope every database operation to the verified UUID, and store resumes in a
+private bucket. Cloud mode is disabled by default and never migrates local SQLite.
+See [docs/FASTAPI_PHASE2.md](docs/FASTAPI_PHASE2.md) for setup, API examples,
+Alembic migrations, test commands, operational cleanup and limitations.
+
+For the final synthetic two-user integration check, safe cleanup and public API
+security settings, see [Phase 2 verification](docs/PHASE2_VERIFICATION.md).
+Live verification is opt-in and must use dedicated test accounts.
+
+## Phase 3 web application
+
+A separate Next.js App Router frontend lives in [`web/`](web/). It uses real
+Supabase authentication and the Phase 2 FastAPI document/history APIs. The original
+Python `frontend/` and Streamlit application are preserved. See
+[Next.js setup, security and integration status](docs/NEXTJS_PHASE3.md) for local
+commands and the explicit Phase 4 endpoint dependencies. Nothing is deployed
+or merged automatically; Phase 2 final live verification remains pending.
+
+## Phase 4 feature integration
+
+The Next.js workspace now connects detailed ATS reports, job matching,
+source-grounded writing suggestions, private builder drafts and server PDF/DOCX
+exports to authenticated FastAPI routes. Apply the additive migration before
+running this branch against an existing cloud database. See the
+[Phase 4 API, security, tests and operator guide](docs/PHASE4_INTEGRATION.md).
+Live Supabase/provider and browser verification remain pending; nothing is
+merged or deployed automatically.
+
+## Phase 5 production preparation
+
+Deployment configuration and safe QA are prepared without deploying anything.
+See [the production runbook](docs/PRODUCTION_PHASE5.md) and
+[Windows CMD instructions](docs/WINDOWS_PHASE5.md). Render uses the FastAPI
+entry point; Vercel's project root is `web/`. Staging writes, live migrations,
+infrastructure changes and launch each require separate operator approval.

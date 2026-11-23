@@ -19,3 +19,6 @@ smoke_out/
 .DS_Store
 Thumbs.db
 *.swp
+
+# Local verifier recovery journals (resource identifiers only, never credentials)
+/work/
